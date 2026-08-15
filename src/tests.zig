@@ -6,6 +6,7 @@ const scalar = @import("scalar.zig");
 const vec = @import("vec.zig");
 const mat = @import("mat.zig");
 const quat = @import("quat.zig");
+const constants = @import("constants.zig");
 
 const Vec = vec.Vec;
 const Mat = mat.Mat;
@@ -15,6 +16,7 @@ const vec3 = Vec(3, f32);
 const vec4 = Vec(4, f32);
 const bvec3 = Vec(3, bool);
 const ivec3 = Vec(3, i32);
+const ivec4 = Vec(4, i32);
 const mat2 = Mat(2, 2, f32);
 const mat3 = Mat(3, 3, f32);
 const mat4 = Mat(4, 4, f32);
@@ -71,6 +73,36 @@ test "scalar modf frexp ldexp" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.78125), f.significand, 1e-6);
     try std.testing.expectEqual(@as(i32, 4), f.exponent);
     try std.testing.expectApproxEqAbs(@as(f32, 12.5), scalar.ldexp(@as(f32, 0.78125), 4), 1e-6);
+}
+
+test "constants" {
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0000001192), constants.epsilon(f32), 1e-10);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.14159274), constants.pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.877582561), constants.cos_one_over_two(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 6.28318548), constants.two_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.77245385), constants.root_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.57079637), constants.half_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.71238898), constants.three_over_two_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.785398185), constants.quarter_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.318309873), constants.one_over_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.159154937), constants.one_over_two_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.636619747), constants.two_over_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.27323949), constants.four_over_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.12837923), constants.two_over_root_pi(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.707106769), constants.one_over_root_two(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.41421354), constants.root_two(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.73205078), constants.root_three(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.23606798), constants.root_five(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.71828175), constants.e(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.577215672), constants.euler(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.693147182), constants.ln_two(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.30258512), constants.ln_ten(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -0.366512924), constants.ln_ln_two(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.618034), constants.golden_ratio(f32), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f64, 3.14159265358979323846), constants.pi(f64), 1e-15);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.71828182845904523536), constants.e(f64), 1e-15);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.577215664901532860606), constants.euler(f64), 1e-15);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.61803398874989484820), constants.golden_ratio(f64), 1e-15);
 }
 
 test "scalar trig exp" {
@@ -299,6 +331,266 @@ test "mat lookAt clip" {
     }, 1e-6);
 }
 
+test "mat clip variants" {
+    const fovy = 0.78539816339744830961;
+    const aspect = 16.0 / 9.0;
+    const pz = [4]f32{ 1.35799515, 0, 0, 0 };
+    const p1 = [4]f32{ 0, 2.41421342, 0, 0 };
+
+    try expectMat4Approx(mat.ortho2D(-1, 1, -1, 1), .{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, -1, 0,
+        0, 0, 0, 1,
+    }, 1e-6);
+    try expectMat4Approx(mat.orthoLH_ZO(-1, 1, -1, 1, 0.1, 100.0), .{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 0.0100100096, 0,
+        0, 0, -0.00100100099, 1,
+    }, 1e-6);
+    try expectMat4Approx(mat.orthoLH_NO(-1, 1, -1, 1, 0.1, 100.0), .{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 0.0200200193, 0,
+        0, 0, -1.002002, 1,
+    }, 1e-6);
+    try expectMat4Approx(mat.orthoRH_NO(-1, 1, -1, 1, 0.1, 100.0), .{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, -0.0200200193, 0,
+        0, 0, -1.002002, 1,
+    }, 1e-6);
+    try expectMat4Approx(mat.orthoZO(-1, 1, -1, 1, 0.1, 100.0), .{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, -0.0100100096, 0,
+        0, 0, -0.00100100099, 1,
+    }, 1e-6);
+    try expectMat4Approx(mat.orthoLH(-1, 1, -1, 1, 0.1, 100.0), .{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 0.0200200193, 0,
+        0, 0, -1.002002, 1,
+    }, 1e-6);
+
+    try expectMat4Approx(mat.frustumLH_ZO(-1, 1, -1, 1, 0.1, 100.0), .{
+        0.100000001, 0, 0, 0,
+        0, 0.100000001, 0, 0,
+        0, 0, 1.001001, 1,
+        0, 0, -0.1001001, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.frustumLH_NO(-1, 1, -1, 1, 0.1, 100.0), .{
+        0.100000001, 0, 0, 0,
+        0, 0.100000001, 0, 0,
+        0, 0, 1.002002, 1,
+        0, 0, -0.2002002, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.frustumRH_ZO(-1, 1, -1, 1, 0.1, 100.0), .{
+        0.100000001, 0, 0, 0,
+        0, 0.100000001, 0, 0,
+        0, 0, -1.001001, -1,
+        0, 0, -0.1001001, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.frustumRH_NO(-1, 1, -1, 1, 0.1, 100.0), .{
+        0.100000001, 0, 0, 0,
+        0, 0.100000001, 0, 0,
+        0, 0, -1.002002, -1,
+        0, 0, -0.2002002, 0,
+    }, 1e-6);
+
+    try expectMat4Approx(mat.perspectiveRH_NO(fovy, aspect, 0.1, 100.0), .{
+        pz[0], pz[1], pz[2], pz[3],
+        p1[0], p1[1], p1[2], p1[3],
+        0, 0, -1.002002, -1,
+        0, 0, -0.2002002, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.perspectiveLH_NO(fovy, aspect, 0.1, 100.0), .{
+        pz[0], pz[1], pz[2], pz[3],
+        p1[0], p1[1], p1[2], p1[3],
+        0, 0, 1.002002, 1,
+        0, 0, -0.2002002, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.perspectiveZO(fovy, aspect, 0.1, 100.0), .{
+        pz[0], pz[1], pz[2], pz[3],
+        p1[0], p1[1], p1[2], p1[3],
+        0, 0, -1.001001, -1,
+        0, 0, -0.1001001, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.perspectiveLH(fovy, aspect, 0.1, 100.0), .{
+        pz[0], pz[1], pz[2], pz[3],
+        p1[0], p1[1], p1[2], p1[3],
+        0, 0, 1.002002, 1,
+        0, 0, -0.2002002, 0,
+    }, 1e-6);
+
+    const fov = 0.78539816339744830961;
+    try expectMat4Approx(mat.perspectiveFov(fov, 1280.0, 720.0, 0.1, 100.0), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, -1.002002, -1,
+        0, 0, -0.2002002, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.perspectiveFovRH_ZO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, -1.001001, -1,
+        0, 0, -0.1001001, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.perspectiveFovLH_ZO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, 1.001001, 1,
+        0, 0, -0.1001001, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.perspectiveFovLH_NO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, 1.002002, 1,
+        0, 0, -0.2002002, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.perspectiveFovZO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, -1.001001, -1,
+        0, 0, -0.1001001, 0,
+    }, 1e-6);
+
+    try expectMat4Approx(mat.infinitePerspective(fovy, aspect, 0.1), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, -1, -1,
+        0, 0, -0.200000003, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.infinitePerspectiveRH_ZO(fovy, aspect, 0.1), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, -1, -1,
+        0, 0, -0.100000001, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.infinitePerspectiveLH_ZO(fovy, aspect, 0.1), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, 1, 1,
+        0, 0, -0.100000001, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.infinitePerspectiveLH_NO(fovy, aspect, 0.1), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, 1, 1,
+        0, 0, -0.200000003, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.tweakedInfinitePerspective(fovy, aspect, 0.1, std.math.floatEps(f32)), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, -0.999999881, -1,
+        0, 0, -0.199999988, 0,
+    }, 1e-6);
+    try expectMat4Approx(mat.tweakedInfinitePerspective(fovy, aspect, 0.1, 0.001), .{
+        1.35799503, 0, 0, 0,
+        0, 2.41421342, 0, 0,
+        0, 0, -0.999000013, -1,
+        0, 0, -0.199900001, 0,
+    }, 1e-6);
+}
+
+test "mat projection" {
+    const fovy = 0.78539816339744830961;
+    const aspect = 16.0 / 9.0;
+    const proj = mat.perspective(fovy, aspect, 0.1, 100.0);
+    const model = mat4.identity().translate(vec3.init(.{ 1, 2, 3 }));
+    const vp = vec4.init(.{ 0, 0, 800, 600 });
+    const obj = vec3.init(.{ 1, 2, 3 });
+    const win_no = mat.projectNO(obj, model, proj, vp);
+    try std.testing.expectApproxEqAbs(@as(f32, 218.93396), win_no.v[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, -182.842682), win_no.v[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.01768434), win_no.v[2], 1e-4);
+    const win_zo = mat.projectZO(obj, model, proj, vp);
+    try std.testing.expectApproxEqAbs(@as(f32, 218.93396), win_zo.v[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, -182.842682), win_zo.v[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.03536868), win_zo.v[2], 1e-4);
+    const un = mat.unProject(win_no, model, proj, vp);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.00000501), un.v[0], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0000155), un.v[1], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.00000572), un.v[2], 1e-5);
+    const unz = mat.unProjectZO(win_no, model, proj, vp);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.255337), unz.v[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 6.51068544), unz.v[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 9.76600361), unz.v[2], 1e-4);
+    try expectMat4Approx(mat.pickMatrix(vec2.init(.{ 400, 300 }), vec2.init(.{ 100, 100 }), vp), .{
+        8, 0, 0, 0,
+        0, 6, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    }, 1e-6);
+}
+
+test "mat common relational inverse" {
+    const A = mat4.diag(2).translate(vec3.init(.{ 1, 2, 3 }));
+    const B = mat4.identity().rotate(0.5, vec3.init(.{ 0, 1, 0 }));
+    try expectMat4Approx(A.abs(), .{
+        2, 0, 0, 0,
+        0, 2, 0, 0,
+        0, 0, 2, 0,
+        2, 4, 6, 2,
+    }, 1e-6);
+    try expectMat4Approx(A.mix(B, 0.25), .{
+        1.71939564, 0, -0.119856387, 0,
+        0, 1.75, 0, 0,
+        0.119856387, 0, 1.71939564, 0,
+        1.5, 3, 4.5, 1.75,
+    }, 1e-6);
+    try expectMat4Approx(A.mix(B, mat4.diag(2)), .{
+        -0.2448349, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, -0.2448349, 0,
+        2, 4, 6, 0,
+    }, 1e-6);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, true, true }), A.equal(A).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, false, false }), A.equal(B).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, true, true }), A.notEqual(B).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, false, false }), A.equalEps(B, 0.1).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, true, true }), A.equalEps(B, vec4.init(.{ 0.1, 0.1, 100, 100 })).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, true, true }), A.notEqualEps(B, 0.1).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, false, false }), A.equalULP(B, 2).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, false, false }), A.equalULP(B, ivec4.init(.{ 2, 2, 10000, 10000 })).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, true, true }), A.notEqualULP(B, 2).v);
+
+    const m3a = Mat(3, 3, f32).init(.{
+        vec3.init(.{ 1, 2, 0 }),
+        vec3.init(.{ 0, 1, 0 }),
+        vec3.init(.{ 3, 4, 1 }),
+    });
+    const ai3 = mat.affineInverse3(m3a);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), ai3.data[0].v[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -2), ai3.data[0].v[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -3), ai3.data[2].v[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), ai3.data[2].v[1], 1e-6);
+    try expectMat4Approx(mat.affineInverse(A), .{
+        0.5, 0, 0, 0,
+        0, 0.5, 0, 0,
+        0, 0, 0.5, 0,
+        -1, -2, -3, 1,
+    }, 1e-6);
+    const it4 = mat.inverseTranspose(A);
+    try expectMat4Approx(it4, .{
+        0.5, -0.0, 0, -0.5,
+        -0.0, 0.5, -0.0, -1,
+        0, -0.0, 0.5, -1.5,
+        -0.0, 0, -0.0, 0.5,
+    }, 1e-6);
+    const it3 = mat.inverseTranspose3(Mat(3, 3, f32).init(.{
+        vec3.init(.{ 1, 2, 3 }),
+        vec3.init(.{ 0, 1, 4 }),
+        vec3.init(.{ 5, 6, 0 }),
+    }));
+    try std.testing.expectApproxEqAbs(@as(f32, -24), it3.data[0].v[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 20), it3.data[0].v[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -5), it3.data[0].v[2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -4), it3.data[2].v[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), it3.data[2].v[2], 1e-6);
+}
+
 test "mat comp mult outer" {
     const id = mat4.identity();
     const t = id.translate(vec3.init(.{ 1, 2, 3 }));
@@ -387,6 +679,29 @@ test "quat angle axis euler" {
     const rv = quat.rotate(q, 0.5, vec3.init(.{ 1, 0, 0 })).mulVec3(vec3.init(.{ 1, 0, 0 }));
     try expectVecApprox(rv, vec3.init(.{ 0.87758255, 7.4505806e-09, -0.47942555 }), 1e-6);
     try expectQuatApprox(Quat(f32).init(2, 1, 0.5, 0.25).normalize(), .{ 0.867721856, 0.433860928, 0.216930464, 0.108465232 }, 1e-6);
+}
+
+test "quat exp log pow" {
+    const q = quat.angleAxis(0.5, vec3.init(.{ 0, 1, 0 }));
+    try expectQuatApprox(quat.exp(q), .{ 0.969551444, 0, 0.244887799, 0 }, 1e-6);
+    try expectQuatApprox(quat.log(q), .{ 0, 0, 0.25, 0 }, 1e-6);
+    try expectQuatApprox(quat.log(Quat(f32).init(-0.5, 0, 0, 0)), .{ -0.693147182, 3.14159274, 0, 0 }, 1e-6);
+    try expectQuatApprox(quat.pow(q, 2.5), .{ 0.810963094, 0, 0.585097253, 0 }, 1e-6);
+    try expectQuatApprox(quat.sqrt(q), .{ 0.992197692, 0, 0.12467473, 0 }, 1e-6);
+    const q2 = quat.angleAxis(0.3, vec3.init(.{ 1, 0, 0 }));
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, true, true }), quat.equal(q, q).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, true, false }), quat.equal(q, q2).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, true, true }), quat.equalEps(q, q2, 0.1).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, false, true }), quat.notEqual(q, q2).v);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, false, false }), quat.notEqualEps(q, q2, 0.1).v);
+    const nan_q = Quat(f32).init(std.math.nan(f32), 0, 0, 0);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, false, true }), quat.isnan(nan_q).v);
+    const inf_q = Quat(f32).init(std.math.inf(f32), 0, 0, 0);
+    try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, false, true }), quat.isinf(inf_q).v);
+    try expectQuatApprox(quat.quatLookAtRH(vec3.init(.{ 0, 0, -1 }), vec3.init(.{ 0, 1, 0 })), .{ 1, 0, 0, 0 }, 1e-6);
+    try expectQuatApprox(quat.quatLookAtLH(vec3.init(.{ 0, 0, -1 }), vec3.init(.{ 0, 1, 0 })), .{ 0, 0, 1, 0 }, 1e-6);
+    try expectQuatApprox(quat.quatLookAt(vec3.init(.{ 0, 0, -1 }), vec3.init(.{ 0, 1, 0 })), .{ 1, 0, 0, 0 }, 1e-6);
+    try expectQuatApprox(quat.slerpSpin(Quat(f32).init(1, 0, 0, 0), q, 0.25, 1), .{ 0.661560714, 0, 0.749891579, 0 }, 1e-6);
 }
 
 // ---- constructors ----

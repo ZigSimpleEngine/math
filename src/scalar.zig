@@ -355,3 +355,416 @@ pub fn usubBorrow(x: anytype, y: anytype) struct { diff: @TypeOf(x, y), borrow: 
 pub fn compAdd(x: anytype) @TypeOf(x) {
     return x;
 }
+
+// ---- ext/scalar_common ----
+
+pub fn min3(x: anytype, y: anytype, z: anytype) @TypeOf(x, y, z) {
+    return min(min(x, y), z);
+}
+
+pub fn min4(x: anytype, y: anytype, z: anytype, w: anytype) @TypeOf(x, y, z, w) {
+    return min(min(x, y), min(z, w));
+}
+
+pub fn max3(x: anytype, y: anytype, z: anytype) @TypeOf(x, y, z) {
+    return max(max(x, y), z);
+}
+
+pub fn max4(x: anytype, y: anytype, z: anytype, w: anytype) @TypeOf(x, y, z, w) {
+    return max(max(x, y), max(z, w));
+}
+
+/// NaN-aware min (GLM fmin 2-arg).
+pub fn fmin(x: anytype, y: anytype) @TypeOf(x, y) {
+    if (isNan(x)) return y;
+    if (isNan(y)) return x;
+    return min(x, y);
+}
+
+pub fn fmin3(x: anytype, y: anytype, z: anytype) @TypeOf(x, y, z) {
+    if (isNan(x)) return fmin(y, z);
+    if (isNan(y)) return fmin(x, z);
+    if (isNan(z)) return min(x, y);
+    return min3(x, y, z);
+}
+
+pub fn fmin4(x: anytype, y: anytype, z: anytype, w: anytype) @TypeOf(x, y, z, w) {
+    if (isNan(x)) return fmin3(y, z, w);
+    if (isNan(y)) return min(x, fmin(z, w));
+    if (isNan(z)) return fmin(min(x, y), w);
+    if (isNan(w)) return min3(x, y, z);
+    return min4(x, y, z, w);
+}
+
+/// NaN-aware max (GLM fmax 2-arg).
+pub fn fmax(x: anytype, y: anytype) @TypeOf(x, y) {
+    if (isNan(x)) return y;
+    if (isNan(y)) return x;
+    return max(x, y);
+}
+
+pub fn fmax3(x: anytype, y: anytype, z: anytype) @TypeOf(x, y, z) {
+    if (isNan(x)) return fmax(y, z);
+    if (isNan(y)) return fmax(x, z);
+    if (isNan(z)) return max(x, y);
+    return max3(x, y, z);
+}
+
+pub fn fmax4(x: anytype, y: anytype, z: anytype, w: anytype) @TypeOf(x, y, z, w) {
+    if (isNan(x)) return fmax3(y, z, w);
+    if (isNan(y)) return max(x, fmax(z, w));
+    if (isNan(z)) return fmax(max(x, y), w);
+    if (isNan(w)) return max3(x, y, z);
+    return max4(x, y, z, w);
+}
+
+pub fn fclamp(x: anytype, min_val: anytype, max_val: anytype) @TypeOf(x, min_val, max_val) {
+    return fmin(fmax(x, min_val), max_val);
+}
+
+pub fn clamp01(x: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    return clamp(x, @as(T, 0), @as(T, 1));
+}
+
+pub fn repeat(x: anytype) @TypeOf(x) {
+    return fract(x);
+}
+
+pub fn mirrorClamp(x: anytype) @TypeOf(x) {
+    return fract(abs(x));
+}
+
+pub fn mirrorRepeat(x: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    const abs_x = abs(x);
+    const clamp_v = mod(floor(abs_x), @as(T, 2));
+    const floor_v = floor(abs_x);
+    const rest = abs_x - floor_v;
+    const mirror = clamp_v + rest;
+    return mix(rest, @as(T, 1) - rest, mirror >= @as(T, 1));
+}
+
+/// GLM iround: int(x + 0.5) for x >= 0.
+pub fn iround(x: anytype) i32 {
+    const T = rtType(@TypeOf(x));
+    return @as(i32, @intFromFloat(@as(T, x) + @as(T, 0.5)));
+}
+
+/// GLM uround: uint(x + 0.5) for x >= 0.
+pub fn uround(x: anytype) u32 {
+    const T = rtType(@TypeOf(x));
+    return @as(u32, @intFromFloat(@as(T, x) + @as(T, 0.5)));
+}
+
+// ---- ext/scalar_reciprocal ----
+
+pub fn sec(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return @as(T, 1) / cos(@as(T, x));
+}
+
+pub fn csc(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return @as(T, 1) / sin(@as(T, x));
+}
+
+pub fn cot(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    const pi_over_2: T = cast(T, 3.1415926535897932384626433832795 / 2.0);
+    return tan(pi_over_2 - @as(T, x));
+}
+
+pub fn asec(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return acos(@as(T, 1) / @as(T, x));
+}
+
+pub fn acsc(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return asin(@as(T, 1) / @as(T, x));
+}
+
+pub fn acot(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    const pi_over_2: T = cast(T, 3.1415926535897932384626433832795 / 2.0);
+    return pi_over_2 - atan(@as(T, x));
+}
+
+pub fn sech(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return @as(T, 1) / cosh(@as(T, x));
+}
+
+pub fn csch(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return @as(T, 1) / sinh(@as(T, x));
+}
+
+pub fn coth(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return cosh(@as(T, x)) / sinh(@as(T, x));
+}
+
+pub fn asech(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return acosh(@as(T, 1) / @as(T, x));
+}
+
+pub fn acsch(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return asinh(@as(T, 1) / @as(T, x));
+}
+
+pub fn acoth(x: anytype) rtType(@TypeOf(x)) {
+    const T = rtType(@TypeOf(x));
+    return atanh(@as(T, 1) / @as(T, x));
+}
+
+// ---- ext/scalar_relational + gtc/epsilon ----
+
+pub fn equalEps(x: anytype, y: anytype, eps: anytype) bool {
+    return abs(x - y) <= eps;
+}
+
+pub fn notEqualEps(x: anytype, y: anytype, eps: anytype) bool {
+    return abs(x - y) > eps;
+}
+
+pub fn epsilonEqual(x: anytype, y: anytype, eps: anytype) bool {
+    return abs(x - y) < eps;
+}
+
+pub fn epsilonNotEqual(x: anytype, y: anytype, eps: anytype) bool {
+    return abs(x - y) >= eps;
+}
+
+const FltInt = struct {
+    fn asI32(f: f32) i32 {
+        return @as(i32, @bitCast(f));
+    }
+    fn asI64(d: f64) i64 {
+        return @as(i64, @bitCast(d));
+    }
+};
+
+/// GLM equal(x, y, MaxULPs): bit-exact ULP comparison.
+pub fn equalULP(x: anytype, y: anytype, max_ulps: anytype) bool {
+    const T = @TypeOf(x);
+    if (T == f64) {
+        const a: i64 = FltInt.asI64(x);
+        const b: i64 = FltInt.asI64(y);
+        if ((a < 0) != (b < 0)) return false;
+        return abs(a - b) <= @as(i64, max_ulps);
+    } else {
+        const a: i32 = FltInt.asI32(x);
+        const b: i32 = FltInt.asI32(y);
+        if ((a < 0) != (b < 0)) return false;
+        return abs(a - b) <= @as(i32, max_ulps);
+    }
+}
+
+pub fn notEqualULP(x: anytype, y: anytype, max_ulps: anytype) bool {
+    return !equalULP(x, y, max_ulps);
+}
+
+// ---- ext/scalar_ulp ----
+
+/// GLM nextFloat(x): next representable float toward +inf (std::nextafter to max).
+pub fn nextFloat(x: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    return std.math.nextAfter(x, std.math.inf(T));
+}
+
+pub fn nextFloatN(x: anytype, ulps: i32) @TypeOf(x) {
+    var temp = x;
+    var i: i32 = 0;
+    while (i < ulps) : (i += 1) temp = nextFloat(temp);
+    return temp;
+}
+
+/// GLM prevFloat(x): next representable float toward -inf (std::nextafter to -max).
+pub fn prevFloat(x: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    return std.math.nextAfter(x, -std.math.inf(T));
+}
+
+pub fn prevFloatN(x: anytype, ulps: i32) @TypeOf(x) {
+    var temp = x;
+    var i: i32 = 0;
+    while (i < ulps) : (i += 1) temp = prevFloat(temp);
+    return temp;
+}
+
+/// GLM floatDistance(x, y): abs(bit-pattern distance) — note GLM returns abs(a.i - b.i)
+/// without the sign check used by equalULP.
+pub fn floatDistance(x: anytype, y: anytype) i64 {
+    const T = @TypeOf(x, y);
+    if (T == f64) {
+        return abs(FltInt.asI64(x) - FltInt.asI64(y));
+    } else {
+        const a: f32 = @floatCast(x);
+        const b: f32 = @floatCast(y);
+        return abs(@as(i64, FltInt.asI32(a)) - @as(i64, FltInt.asI32(b)));
+    }
+}
+
+// ---- bit-casts (func_common) ----
+
+pub fn floatBitsToInt(v: f32) i32 {
+    return @as(i32, @bitCast(v));
+}
+
+pub fn floatBitsToUint(v: f32) u32 {
+    return @as(u32, @bitCast(v));
+}
+
+pub fn intBitsToFloat(v: i32) f32 {
+    return @as(f32, @bitCast(v));
+}
+
+pub fn uintBitsToFloat(v: u32) f32 {
+    return @as(f32, @bitCast(v));
+}
+
+// ---- ext/scalar_integer + gtc/round ----
+
+pub fn isPowerOfTwo(value: anytype) bool {
+    const T = @TypeOf(value);
+    const result = if (isSigned(T)) abs(value) else value;
+    return (result & (result - 1)) == 0;
+}
+
+/// C++-semantics integer remainder (truncated, matches GLM's `%`).
+pub fn remInt(a: anytype, b: anytype) @TypeOf(a, b) {
+    return a % b;
+}
+
+pub fn isMultiple(value: anytype, multiple: anytype) bool {
+    return value % multiple == 0;
+}
+
+pub fn ceilPowerOfTwo(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    const bits: comptime_int = @typeInfo(T).int.bits;
+    const sign_val = sign(value);
+    var v = abs(value) -% 1;
+    comptime var shift: u6 = 1;
+    inline while (shift < bits) : (shift <<= 1) {
+        v |= v >> shift;
+    }
+    return (v +% 1) * sign_val;
+}
+
+pub fn floorPowerOfTwo(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (isPowerOfTwo(value)) return value;
+    return @as(T, 1) << @intCast(findMSB(value));
+}
+
+pub fn roundPowerOfTwo(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (isPowerOfTwo(value)) return value;
+    const prev = @as(T, 1) << @intCast(findMSB(value));
+    const next = prev << 1;
+    return if ((next - value) < (value - prev)) next else prev;
+}
+
+pub fn nextPowerOfTwo(value: anytype) @TypeOf(value) {
+    return ceilPowerOfTwo(value);
+}
+
+pub fn prevPowerOfTwo(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (isPowerOfTwo(value)) return value;
+    return @as(T, 1) << @intCast(findMSB(value));
+}
+
+pub fn nextMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
+    return ceilMultiple(source, multiple);
+}
+
+pub fn prevMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
+    return floorMultiple(source, multiple);
+}
+
+pub fn ceilMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
+    const T = @TypeOf(source, multiple);
+    if (comptime isFloat(T)) {
+        if (source > @as(T, 0)) {
+            return source + (multiple - @rem(source, multiple));
+        } else {
+            return source + @rem(-source, multiple);
+        }
+    } else if (comptime isSigned(T)) {
+        if (source > @as(T, 0)) {
+            const tmp = source - 1;
+            return tmp + (multiple - remInt(tmp, multiple));
+        } else {
+            return source + remInt(-source, multiple);
+        }
+    } else {
+        const tmp = source -% 1;
+        return tmp + (multiple - remInt(tmp, multiple));
+    }
+}
+
+pub fn floorMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
+    const T = @TypeOf(source, multiple);
+    if (comptime isFloat(T)) {
+        if (source >= @as(T, 0)) {
+            return source - @rem(source, multiple);
+        } else {
+            return source - @rem(source, multiple) - multiple;
+        }
+    } else if (source >= @as(T, 0)) {
+        return source - remInt(source, multiple);
+    } else {
+        const tmp = source + 1;
+        return tmp - remInt(tmp, multiple) - multiple;
+    }
+}
+
+pub fn roundMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
+    const T = @TypeOf(source, multiple);
+    if (comptime isFloat(T)) {
+        if (source >= @as(T, 0)) {
+            return source - @rem(source, multiple);
+        } else {
+            const tmp = source + @as(T, 1);
+            return tmp - @rem(tmp, multiple) - multiple;
+        }
+    } else if (source >= @as(T, 0)) {
+        return source - remInt(source, multiple);
+    } else {
+        const tmp = source + 1;
+        return tmp - remInt(tmp, multiple) - multiple;
+    }
+}
+
+/// GLM findNSB: position of the most significant group of `count` set bits.
+pub fn findNSB(x: anytype, significant_bit_count: i32) i32 {
+    const T = @TypeOf(x);
+    const bits: comptime_int = @typeInfo(T).int.bits;
+    if (bitCount(x) < significant_bit_count) return -1;
+    const one: T = 1;
+    var bit_pos: i32 = 0;
+    var key = x;
+    var n_bit_count = significant_bit_count;
+    var bit_step: i32 = @intCast(bits / 2);
+    while (key > one) {
+        const mask = (@as(T, 1) << @intCast(bit_step)) - 1;
+        const current_key = key & mask;
+        const current_bit_count = bitCount(current_key);
+        if (n_bit_count > current_bit_count) {
+            n_bit_count -= current_bit_count;
+            bit_pos += bit_step;
+            key >>= @intCast(bit_step);
+        } else {
+            key = key & mask;
+        }
+        bit_step >>= 1;
+        if (bit_step == 0) break;
+    }
+    return bit_pos;
+}

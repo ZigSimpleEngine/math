@@ -369,3 +369,145 @@ pub fn slerp(x: anytype, y: anytype, a: @TypeOf(x).value_type) @TypeOf(x) {
     const angleRad = scalar.acos(cosTheta);
     return x.mulScalar(scalar.sin((@as(T, 1) - a) * angleRad)).add(z.mulScalar(scalar.sin(a * angleRad))).divScalar(scalar.sin(angleRad));
 }
+
+/// GLM `slerp(qua, qua, a, k)` — slerp with `k` extra spins, Graphics Gems III.
+pub fn slerpSpin(x: anytype, y: anytype, a: @TypeOf(x).value_type, k: anytype) @TypeOf(x) {
+    const T = @TypeOf(x).value_type;
+    const Q = @TypeOf(x);
+    var z = y;
+    var cosTheta = x.dot(y);
+    if (cosTheta < @as(T, 0)) {
+        z = y.neg();
+        cosTheta = -cosTheta;
+    }
+    if (cosTheta > @as(T, 1) - std.math.floatEps(T)) {
+        return Q.init(scalar.mix(x.w, z.w, a), scalar.mix(x.x, z.x, a), scalar.mix(x.y, z.y, a), scalar.mix(x.z, z.z, a));
+    }
+    const angleRad = scalar.acos(cosTheta);
+    const phi = angleRad + @as(T, scalar.cast(T, k)) * std.math.pi;
+    return x.mulScalar(scalar.sin(angleRad - a * phi)).add(z.mulScalar(scalar.sin(a * phi))).divScalar(scalar.sin(angleRad));
+}
+
+/// GLM `exp(qua)` — quaternion exponential, ext/quaternion_exponential.
+pub fn exp(q: anytype) @TypeOf(q) {
+    const T = @TypeOf(q).value_type;
+    const Q = @TypeOf(q);
+    const u = Vec(3, T).init(.{ q.x, q.y, q.z });
+    const vec_angle = u.length();
+    if (vec_angle < std.math.floatEps(T)) return Q.identity();
+    const v = u.div(vec_angle);
+    return Q.initScalarVec(scalar.cos(vec_angle), v.mul(scalar.sin(vec_angle)));
+}
+
+/// GLM `log(qua)` — quaternion logarithm, ext/quaternion_exponential.
+pub fn log(q: anytype) @TypeOf(q) {
+    const T = @TypeOf(q).value_type;
+    const Q = @TypeOf(q);
+    const u = Vec(3, T).init(.{ q.x, q.y, q.z });
+    const vec3_len = u.length();
+    if (vec3_len < std.math.floatEps(T)) {
+        if (q.w > @as(T, 0)) return Q.initScalarVec(scalar.log(q.w), Vec(3, T).zero());
+        if (q.w < @as(T, 0)) return Q.initScalarVec(scalar.log(-q.w), Vec(3, T).init(.{ std.math.pi, 0, 0 }));
+        return Q.init(std.math.inf(T), std.math.inf(T), std.math.inf(T), std.math.inf(T));
+    }
+    const t = scalar.atan2(vec3_len, q.w) / vec3_len;
+    const quat_len2 = vec3_len * vec3_len + q.w * q.w;
+    return Q.initScalarVec(@as(T, 0.5) * scalar.log(quat_len2), Vec(3, T).init(.{ t * q.x, t * q.y, t * q.z }));
+}
+
+/// GLM `pow(qua, y)` — ext/quaternion_exponential.
+pub fn pow(q: anytype, y: @TypeOf(q).value_type) @TypeOf(q) {
+    const T = @TypeOf(q).value_type;
+    const Q = @TypeOf(q);
+    const eps = std.math.floatEps(T);
+    if (y > -eps and y < eps) return Q.init(@as(T, 1), 0, 0, 0);
+    const magnitude = scalar.sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    var ang: T = undefined;
+    if (scalar.abs(q.w / magnitude) > @as(T, 0.877582561890372716130286068203503191)) {
+        const vector_magnitude = q.x * q.x + q.y * q.y + q.z * q.z;
+        if (vector_magnitude < std.math.floatMin(T)) {
+            return Q.init(scalar.pow(q.w, y), 0, 0, 0);
+        }
+        ang = scalar.asin(scalar.sqrt(vector_magnitude) / magnitude);
+    } else {
+        ang = scalar.acos(q.w / magnitude);
+    }
+    const new_angle = ang * y;
+    const div = scalar.sin(new_angle) / scalar.sin(ang);
+    const mag = scalar.pow(magnitude, y - @as(T, 1));
+    return Q.init(scalar.cos(new_angle) * magnitude * mag, q.x * div * mag, q.y * div * mag, q.z * div * mag);
+}
+
+/// GLM `sqrt(qua)` — `pow(q, 0.5)`, ext/quaternion_exponential.
+pub fn sqrt(q: anytype) @TypeOf(q) {
+    return pow(q, @as(@TypeOf(q).value_type, 0.5));
+}
+
+/// GLM `equal(qua, qua)` — per-component bvec4, ext/quaternion_relational.
+pub fn equal(x: anytype, y: anytype) Vec(4, bool) {
+    return Vec(4, bool).init(.{ x.x == y.x, x.y == y.y, x.z == y.z, x.w == y.w });
+}
+
+/// GLM `equal(qua, qua, T epsilon)` — `abs(x - y) < eps` per component.
+pub fn equalEps(x: anytype, y: anytype, eps: @TypeOf(x).value_type) Vec(4, bool) {
+    const T = @TypeOf(x).value_type;
+    const v = Vec(4, T).init(.{ x.x - y.x, x.y - y.y, x.z - y.z, x.w - y.w });
+    return Vec(4, bool).init(.{
+        scalar.abs(v.v[0]) < eps,
+        scalar.abs(v.v[1]) < eps,
+        scalar.abs(v.v[2]) < eps,
+        scalar.abs(v.v[3]) < eps,
+    });
+}
+
+/// GLM `notEqual(qua, qua)` — per-component bvec4.
+pub fn notEqual(x: anytype, y: anytype) Vec(4, bool) {
+    return Vec(4, bool).init(.{ x.x != y.x, x.y != y.y, x.z != y.z, x.w != y.w });
+}
+
+/// GLM `notEqual(qua, qua, T epsilon)` — `abs(x - y) >= eps` per component.
+pub fn notEqualEps(x: anytype, y: anytype, eps: @TypeOf(x).value_type) Vec(4, bool) {
+    const T = @TypeOf(x).value_type;
+    const v = Vec(4, T).init(.{ x.x - y.x, x.y - y.y, x.z - y.z, x.w - y.w });
+    return Vec(4, bool).init(.{
+        scalar.abs(v.v[0]) >= eps,
+        scalar.abs(v.v[1]) >= eps,
+        scalar.abs(v.v[2]) >= eps,
+        scalar.abs(v.v[3]) >= eps,
+    });
+}
+
+/// GLM `isnan(qua)` — per-component bvec4, ext/quaternion_common.
+pub fn isnan(q: anytype) Vec(4, bool) {
+    return Vec(4, bool).init(.{ std.math.isNan(q.x), std.math.isNan(q.y), std.math.isNan(q.z), std.math.isNan(q.w) });
+}
+
+/// GLM `isinf(qua)` — per-component bvec4.
+pub fn isinf(q: anytype) Vec(4, bool) {
+    return Vec(4, bool).init(.{ std.math.isInf(q.x), std.math.isInf(q.y), std.math.isInf(q.z), std.math.isInf(q.w) });
+}
+
+/// GLM `quatLookAtRH(direction, up)` — gtc/quaternion.
+pub fn quatLookAtRH(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
+    const T = @TypeOf(direction).value_type;
+    const c2 = direction.neg();
+    const right = up.cross(c2);
+    const r0 = right.mul(scalar.inversesqrt(scalar.max(@as(T, 0.00001), right.dot(right))));
+    const r1 = c2.cross(r0);
+    return quat_cast(Mat(3, 3, T).init(.{ r0, r1, c2 }));
+}
+
+/// GLM `quatLookAtLH(direction, up)` — gtc/quaternion.
+pub fn quatLookAtLH(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
+    const T = @TypeOf(direction).value_type;
+    const c2 = direction;
+    const right = up.cross(c2);
+    const r0 = right.mul(scalar.inversesqrt(scalar.max(@as(T, 0.00001), right.dot(right))));
+    const r1 = c2.cross(r0);
+    return quat_cast(Mat(3, 3, T).init(.{ r0, r1, c2 }));
+}
+
+/// GLM `quatLookAt(direction, up)` — defaults to RH (matching GLM build config).
+pub fn quatLookAt(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
+    return quatLookAtRH(direction, up);
+}

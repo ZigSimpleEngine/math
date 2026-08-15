@@ -668,6 +668,359 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             return .{ .diff = .{ .v = d }, .borrow = .{ .v = b } };
         }
 
+        // ---- ext/vector_common (GLM 1.1 additions) ----
+
+        pub inline fn fmin(self: Self, rhs: anytype) Self {
+            return self.apply2(rhs, scalar.fmin);
+        }
+
+        pub inline fn fmin3(self: Self, b: anytype, c: anytype) Self {
+            return self.apply3(b, c, scalar.fmin3);
+        }
+
+        pub inline fn fmin4(self: Self, b: anytype, c: anytype, d: anytype) Self {
+            return self.fmin3(b, c).fmin(d);
+        }
+
+        pub inline fn fmax(self: Self, rhs: anytype) Self {
+            return self.apply2(rhs, scalar.fmax);
+        }
+
+        pub inline fn fmax3(self: Self, b: anytype, c: anytype) Self {
+            return self.apply3(b, c, scalar.fmax3);
+        }
+
+        pub inline fn fmax4(self: Self, b: anytype, c: anytype, d: anytype) Self {
+            return self.fmax3(b, c).fmax(d);
+        }
+
+        pub inline fn fclamp(self: Self, lo: anytype, hi: anytype) Self {
+            return self.apply3(lo, hi, scalar.fclamp);
+        }
+
+        pub inline fn clamp01(self: Self) Self {
+            return self.apply(scalar.clamp01);
+        }
+
+        pub inline fn repeat(self: Self) Self {
+            return self.fract();
+        }
+
+        pub inline fn mirrorClamp(self: Self) Self {
+            return self.abs().fract();
+        }
+
+        pub fn mirrorRepeat(self: Self) Self {
+            var r: storage_type = undefined;
+            inline for (0..L) |i| r[i] = scalar.mirrorRepeat(self.v[i]);
+            return .{ .v = r };
+        }
+
+        pub inline fn iround(self: Self) Vec(L, i32) {
+            var r: @Vector(L, i32) = undefined;
+            inline for (0..L) |i| r[i] = scalar.iround(self.v[i]);
+            return .{ .v = r };
+        }
+
+        pub inline fn uround(self: Self) Vec(L, u32) {
+            var r: @Vector(L, u32) = undefined;
+            inline for (0..L) |i| r[i] = scalar.uround(self.v[i]);
+            return .{ .v = r };
+        }
+
+        pub inline fn min3(self: Self, b: Self, c: Self) Self {
+            return self.min(b).min(c);
+        }
+
+        pub inline fn min4(self: Self, b: Self, c: Self, d: Self) Self {
+            return self.min(b).min(c).min(d);
+        }
+
+        pub inline fn max3(self: Self, b: Self, c: Self) Self {
+            return self.max(b).max(c);
+        }
+
+        pub inline fn max4(self: Self, b: Self, c: Self, d: Self) Self {
+            return self.max(b).max(c).max(d);
+        }
+
+        // ---- ext/vector_reciprocal ----
+
+        pub inline fn sec(self: Self) Self {
+            return self.apply(scalar.sec);
+        }
+
+        pub inline fn csc(self: Self) Self {
+            return self.apply(scalar.csc);
+        }
+
+        pub inline fn cot(self: Self) Self {
+            return self.apply(scalar.cot);
+        }
+
+        pub inline fn asec(self: Self) Self {
+            return self.apply(scalar.asec);
+        }
+
+        pub inline fn acsc(self: Self) Self {
+            return self.apply(scalar.acsc);
+        }
+
+        pub inline fn acot(self: Self) Self {
+            return self.apply(scalar.acot);
+        }
+
+        pub inline fn sech(self: Self) Self {
+            return self.apply(scalar.sech);
+        }
+
+        pub inline fn csch(self: Self) Self {
+            return self.apply(scalar.csch);
+        }
+
+        pub inline fn coth(self: Self) Self {
+            return self.apply(scalar.coth);
+        }
+
+        pub inline fn asech(self: Self) Self {
+            return self.apply(scalar.asech);
+        }
+
+        pub inline fn acsch(self: Self) Self {
+            return self.apply(scalar.acsch);
+        }
+
+        pub inline fn acoth(self: Self) Self {
+            return self.apply(scalar.acoth);
+        }
+
+        // ---- ext/vector_relational + gtc/epsilon ----
+
+        pub fn equalEps(self: Self, rhs: anytype, eps: anytype) Vec(L, bool) {
+            const ET = @TypeOf(eps);
+            const ev = comptime isVec(ET);
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.equalEps(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn notEqualEps(self: Self, rhs: anytype, eps: anytype) Vec(L, bool) {
+            const ET = @TypeOf(eps);
+            const ev = comptime isVec(ET);
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.notEqualEps(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn epsilonEqual(self: Self, rhs: Self, eps: anytype) Vec(L, bool) {
+            const ET = @TypeOf(eps);
+            const ev = comptime isVec(ET);
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.epsilonEqual(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn epsilonNotEqual(self: Self, rhs: Self, eps: anytype) Vec(L, bool) {
+            const ET = @TypeOf(eps);
+            const ev = comptime isVec(ET);
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.epsilonNotEqual(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn equalULP(self: Self, rhs: Self, max_ulps: anytype) Vec(L, bool) {
+            const UT = @TypeOf(max_ulps);
+            const uv = comptime isVec(UT);
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| {
+                const u: i32 = if (uv) max_ulps.v[i] else max_ulps;
+                const T2 = @TypeOf(self.v[i]);
+                if (T2 == f64) {
+                    const a: i64 = @bitCast(self.v[i]);
+                    const b: i64 = @bitCast(rhs.v[i]);
+                    if ((a < 0) != (b < 0)) {
+                        const mant_a = a & ((@as(i64, 1) << 52) - 1);
+                        const mant_b = b & ((@as(i64, 1) << 52) - 1);
+                        const exp_a = (a >> 52) & ((@as(i64, 1) << 11) - 1);
+                        const exp_b = (b >> 52) & ((@as(i64, 1) << 11) - 1);
+                        r[i] = mant_a == mant_b and exp_a == exp_b;
+                    } else {
+                        r[i] = scalar.abs(a - b) <= @as(i64, u);
+                    }
+                } else {
+                    const a: i32 = @bitCast(@as(f32, self.v[i]));
+                    const b: i32 = @bitCast(@as(f32, rhs.v[i]));
+                    if ((a < 0) != (b < 0)) {
+                        const mant_a = a & ((@as(i32, 1) << 23) - 1);
+                        const mant_b = b & ((@as(i32, 1) << 23) - 1);
+                        const exp_a = (a >> 23) & ((@as(i32, 1) << 8) - 1);
+                        const exp_b = (b >> 23) & ((@as(i32, 1) << 8) - 1);
+                        r[i] = mant_a == mant_b and exp_a == exp_b;
+                    } else {
+                        r[i] = scalar.abs(a - b) <= u;
+                    }
+                }
+            }
+            return .{ .v = r };
+        }
+
+        pub fn notEqualULP(self: Self, rhs: Self, max_ulps: anytype) Vec(L, bool) {
+            const e = self.equalULP(rhs, max_ulps);
+            return e.not_();
+        }
+
+        /// GLM `not_`: element-wise logical not of a bool vector.
+        pub fn not_(self: Self) Vec(L, bool) {
+            if (comptime T != bool) @compileError("not_() requires a bool vector");
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| r[i] = !self.v[i];
+            return .{ .v = r };
+        }
+
+        // ---- ext/vector_ulp ----
+
+        pub inline fn nextFloat(self: Self) Self {
+            return self.apply(scalar.nextFloat);
+        }
+
+        pub inline fn prevFloat(self: Self) Self {
+            return self.apply(scalar.prevFloat);
+        }
+
+        pub inline fn floatDistance(self: Self, rhs: Self) Vec(L, i64) {
+            var r: @Vector(L, i64) = undefined;
+            inline for (0..L) |i| r[i] = scalar.floatDistance(self.v[i], rhs.v[i]);
+            return .{ .v = r };
+        }
+
+        // ---- bit-casts (func_common) ----
+
+        pub inline fn floatBitsToInt(self: Self) Vec(L, i32) {
+            var r: @Vector(L, i32) = undefined;
+            inline for (0..L) |i| r[i] = scalar.floatBitsToInt(@floatCast(self.v[i]));
+            return .{ .v = r };
+        }
+
+        pub inline fn floatBitsToUint(self: Self) Vec(L, u32) {
+            var r: @Vector(L, u32) = undefined;
+            inline for (0..L) |i| r[i] = scalar.floatBitsToUint(@floatCast(self.v[i]));
+            return .{ .v = r };
+        }
+
+        pub inline fn intBitsToFloat(self: Self) Vec(L, f32) {
+            var r: @Vector(L, f32) = undefined;
+            inline for (0..L) |i| r[i] = scalar.intBitsToFloat(self.v[i]);
+            return .{ .v = r };
+        }
+
+        pub inline fn uintBitsToFloat(self: Self) Vec(L, f32) {
+            var r: @Vector(L, f32) = undefined;
+            inline for (0..L) |i| r[i] = scalar.uintBitsToFloat(self.v[i]);
+            return .{ .v = r };
+        }
+
+        // ---- ext/vector_integer + gtc/round ----
+
+        pub inline fn isPowerOfTwo(self: Self) Vec(L, bool) {
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| r[i] = scalar.isPowerOfTwo(self.v[i]);
+            return .{ .v = r };
+        }
+
+        pub inline fn isMultiple(self: Self, multiple: anytype) Vec(L, bool) {
+            const MT = @TypeOf(multiple);
+            const mv = comptime isVec(MT);
+            var r: @Vector(L, bool) = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.isMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn nextMultiple(self: Self, multiple: anytype) Self {
+            const MT = @TypeOf(multiple);
+            const mv = comptime isVec(MT);
+            var r: storage_type = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.nextMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn prevMultiple(self: Self, multiple: anytype) Self {
+            const MT = @TypeOf(multiple);
+            const mv = comptime isVec(MT);
+            var r: storage_type = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.prevMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn ceilMultiple(self: Self, multiple: anytype) Self {
+            const MT = @TypeOf(multiple);
+            const mv = comptime isVec(MT);
+            var r: storage_type = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.ceilMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn floorMultiple(self: Self, multiple: anytype) Self {
+            const MT = @TypeOf(multiple);
+            const mv = comptime isVec(MT);
+            var r: storage_type = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.floorMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn roundMultiple(self: Self, multiple: anytype) Self {
+            const MT = @TypeOf(multiple);
+            const mv = comptime isVec(MT);
+            var r: storage_type = undefined;
+            inline for (0..L) |i| {
+                r[i] = scalar.roundMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
+            }
+            return .{ .v = r };
+        }
+
+        pub fn ceilPowerOfTwo(self: Self) Self {
+            return self.apply(scalar.ceilPowerOfTwo);
+        }
+
+        pub fn floorPowerOfTwo(self: Self) Self {
+            return self.apply(scalar.floorPowerOfTwo);
+        }
+
+        pub fn roundPowerOfTwo(self: Self) Self {
+            return self.apply(scalar.roundPowerOfTwo);
+        }
+
+        pub fn nextPowerOfTwo(self: Self) Self {
+            return self.apply(scalar.nextPowerOfTwo);
+        }
+
+        pub fn prevPowerOfTwo(self: Self) Self {
+            return self.apply(scalar.prevPowerOfTwo);
+        }
+
+        pub fn findNSB(self: Self, count: anytype) Vec(L, i32) {
+            var r: @Vector(L, i32) = undefined;
+            inline for (0..L) |i| r[i] = scalar.findNSB(self.v[i], count);
+            return .{ .v = r };
+        }
+
         // ---- reductions ----
 
         pub inline fn compAdd(self: Self) T {
