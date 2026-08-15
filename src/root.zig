@@ -1,17 +1,10 @@
 const std = @import("std");
-const Io = std.Io;
 
-/// This is a documentation comment to explain the `printAnotherMessage` function below.
-///
-/// Accepting an `Io.Writer` instance is a handy way to write reusable code.
-pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
-    try writer.print("Run `zig build test` to run the tests.\n", .{});
-}
+pub const scalar = @import("scalar.zig");
+pub const vec = @import("vec.zig");
+pub const mat = @import("mat.zig");
+pub const quat = @import("quat.zig");
 
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
-
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
-}
+pub const Vec = vec.Vec;
+pub const Mat = mat.Mat;
+pub const Quat = quat.Quat;

@@ -1,4 +1,6 @@
 const std = @import("std");
+const LazyPath = std.Build.LazyPath;
+const Module = std.Build.Module;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -10,5 +12,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    _ = mod;
+    const tests = b.addTest(.{ .root_module = mod });
+    const run_tests = b.addRunArtifact(tests);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_tests.step);
 }
