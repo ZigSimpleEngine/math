@@ -1,16 +1,32 @@
-//! Matrix math — GLM-equivalent `mat<C, R, T>` implementation.
-//! Column-major storage: `data[c]` is column c, `data[c][r]` is element at
-//! (column c, row r), matching GLM's `m[c][r]` indexing.
+//! Matrix math — GLM-compatible `mat<C, R, T>` (C columns, R rows).
+//!
+//! Column-major storage: `data[c]` is column c, `data[c][r]` is the element
+//! at (column c, row r), mirroring GLM's `m[c][r]` indexing and GLSL's
+//! column-major layout. Consequently `mul` treats the receiver as the
+//! LEFT operand: `m.mulVec(v)` computes `m * v`, and `a.mul(b)` computes
+//! `a * b` — the order matters, matrix products do not commute.
+//!
+//! Affine 4x4 helpers (`translate`/`scale`/`rotate`) mutate the receiver
+//! like GLM's `glm::translate(m, ...)`, i.e. they append the transform to
+//! an already built matrix instead of prescribing how to build one from
+//! scratch; combine them left-to-right in the order you want applied.
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
 const vec = @import("vec.zig");
 const Vec = vec.Vec;
 
+/// Returns `true` if `T` looks like a matrix produced by `Mat(C, R, T)`
+/// (it declares `cols`/`rows` and carries a `data` field). Use to dispatch
+/// between scalar/vector/matrix operands in generic code.
 pub fn isMat(comptime T: type) bool {
     return @typeInfo(T) == .@"struct" and @hasDecl(T, "cols") and @hasDecl(T, "rows") and @hasField(T, "data");
 }
 
+/// Create a matrix type with `C` columns and `R` rows of scalar `T`
+/// (float or int). The type name doubles as a namespace:
+/// `mat4.identity()`, `Mat(3, 3, f32).zero()`, and the type exposes
+/// `cols`/`rows`/`col_type`/`row_type` metadata for generic code.
 pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
     return struct {
         pub const Self = @This();
@@ -26,25 +42,37 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         // ---- constructors ----
 
+        /// Matrix of all zeroes (GLM `mat(C, R, 0)`). The additive identity
+        /// and the result of `m.sub(m)`; a projection built from scratch
+        /// usually starts here before its few non-zero elements are placed.
         pub fn zero() Self {
             return .{ .data = [_]Vec(R, T){Vec(R, T).zero()} ** C };
         }
 
+        /// Square identity matrix (GLM `mat(v)` with v=1): ones on the
+        /// diagonal, zeroes elsewhere. Multiplying by it changes nothing;
+        /// use it as the starting point of `translate`/`scale`/`rotate`
+        /// chains.
         pub fn identity() Self {
             if (comptime C != R) @compileError("identity requires a square matrix");
             return diag(@as(T, 1));
         }
 
-        /// Matrix with all elements equal to v (GLM elementwise-1 for `1 - a`).
+        /// Matrix with every element equal to `v` (GLM 1.1 `mat(f)`
+        /// elementwise variant). Useful to build per-element factors, e.g.
+        /// GLM's matrix `mix` uses `ones() - a`.
         pub fn one(v: anytype) Self {
             return .{ .data = [_]Vec(R, T){Vec(R, T).fill(scalar.cast(T, v))} ** C };
         }
 
+        /// Matrix of all ones (GLM `mat(1)` fill style). Comes in handy as
+        /// the "1" in element-wise expressions like `ones() - a`.
         pub fn ones() Self {
             return one(@as(T, 1));
         }
 
-        /// Diagonal matrix with value v on the diagonal (GLM `mat4(v)`).
+        /// Diagonal matrix with value `v` on the diagonal (GLM `mat(v)` for
+        /// a scalar v): `diag(1)` is `identity()`, `diag(2)` scales by 2.
         pub fn diag(v: anytype) Self {
             if (comptime C != R) @compileError("diag requires a square matrix");
             var res = zero();
@@ -52,8 +80,10 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return res;
         }
 
-        /// Column constructor: tuple of columns (each a Vec(R, T)), or a scalar
-        /// which builds a diagonal matrix (GLM `mat(v)`).
+        /// Build a matrix from a tuple of columns, each a `Vec(R, T)`
+        /// (GLM's `mat(c0, c1, ...)` column constructor), or from a plain
+        /// scalar which produces `diag(v)`. Use for literals:
+        /// `mat4.init(.{ c0, c1, c2, c3 })` where `cN` are `vec4`s.
         pub fn init(args: anytype) Self {
             const AT = @TypeOf(args);
             if (comptime AT == Self) return args;
@@ -76,18 +106,26 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         // ---- accessors ----
 
+        /// Read element at (column `c`, row `r`), 0-based, runtime indices.
+        /// Prefer `col(i).v[r]` directly for hot paths — it compiles to a
+        /// lane load without the extra call.
         pub inline fn get(self: Self, c: usize, r: usize) T {
             return self.data[c].v[r];
         }
 
+        /// Write element at (column `c`, row `r`) of a mutable matrix.
         pub inline fn set(self: *Self, c: usize, r: usize, v: T) void {
             self.data[c].v[r] = v;
         }
 
+        /// Column c as a vector (GLM `column(m, c)`); indexes 0-based.
+        /// Reading a column is free — it is the native storage unit.
         pub inline fn col(self: Self, i: usize) Vec(R, T) {
             return self.data[i];
         }
 
+        /// Row r as a vector (GLM `row(m, r)`), gathered across columns.
+        /// Costlier than `col`; use for dot products with row-major data.
         pub fn row(self: Self, i: usize) Vec(C, T) {
             var res: Vec(C, T) = undefined;
             inline for (0..C) |c| res.v[c] = self.data[c].v[i];
@@ -96,32 +134,47 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         // ---- arithmetic ----
 
+        /// Element-wise addition (GLM `mat + mat`). Note this is NOT a
+        /// linear-algebra operation — added matrices must share the same
+        /// shape, and the result is per-element sums (rarely meaningful
+        /// for transforms; useful for blending/interpolating weights).
         pub fn add(self: Self, m: Self) Self {
             var res: Self = undefined;
             inline for (0..C) |c| res.data[c] = self.data[c].add(m.data[c]);
             return res;
         }
 
+        /// Element-wise subtraction (GLM `mat - mat`); inverse of `add`.
         pub fn sub(self: Self, m: Self) Self {
             var res: Self = undefined;
             inline for (0..C) |c| res.data[c] = self.data[c].sub(m.data[c]);
             return res;
         }
 
+        /// Scalar multiplication: every element × `s` (GLM `mat * scalar`).
+        /// Use to scale a matrix's effect (e.g. dampen a correction step)
+        /// or with `1/det` when inverting.
         pub fn mulScalar(self: Self, s: anytype) Self {
             var res: Self = undefined;
             inline for (0..C) |c| res.data[c] = self.data[c].mul(s);
             return res;
         }
 
-        /// GLM `matrixCompMult` — component-wise multiplication.
+        /// Component-wise (Hadamard) product (GLM `matrixCompMult`):
+        /// `res[c][r] = a[c][r] * b[c][r]`. Distinct from real matrix
+        /// multiplication `mul`; GLM uses it internally for its `mix`.
         pub fn matrixCompMult(self: Self, m: Self) Self {
             var res: Self = undefined;
             inline for (0..C) |c| res.data[c] = self.data[c].mul(m.data[c]);
             return res;
         }
 
-        /// GLM `mat * mat` — column-major matrix product.
+        /// Matrix product `self * m` (GLM `mat * mat`): column-major
+        /// multiplication. The result has `m`'s column count and `self`'s
+        /// row count (so `Mat(3,2).mul(Mat(4,3))` is a 4×2 matrix — GLM's
+        /// `mat<C,R>*mat<C2,C>` shape rule). Use for composing transforms
+        /// as `model.mul(view)` (view applies first). Order matters:
+        /// `a.mul(b)` is NOT `b.mul(a)`.
         pub fn mul(self: Self, m: anytype) Mat(@TypeOf(m).cols, R, T) {
             const MC = @TypeOf(m).cols;
             var res: Mat(MC, R, T) = undefined;
@@ -129,7 +182,10 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return res;
         }
 
-        /// GLM `mat * vec` — linear combination of columns.
+        /// Matrix × vector: `self * v` (GLM `mat * vec`). Computed as a
+        /// linear combination of `self`'s columns, which is why column-major
+        /// storage exists. This is the "transform a point/direction" call:
+        /// `viewProj.mulVec(pos4)`.
         pub fn mulVec(self: Self, v: Vec(C, T)) Vec(R, T) {
             var res: Vec(R, T) = undefined;
             inline for (0..R) |r| {
@@ -143,7 +199,11 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return res;
         }
 
-        /// GLM `transpose`.
+        /// Transpose (GLM `transpose`): swaps rows and columns, producing
+        /// an R×C matrix. `m.transpose().transpose() == m`; used when
+        /// converting between column- and row-major conventions and when
+        /// inverting rotation matrices (the inverse of an orthogonal matrix
+        /// is its transpose).
         pub fn transpose(self: Self) Mat(R, C, T) {
             var res: Mat(R, C, T) = undefined;
             inline for (0..R) |r| {
@@ -152,7 +212,10 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return res;
         }
 
-        /// GLM `determinant` — square matrices only (2x2, 3x3, 4x4).
+        /// Determinant (GLM `determinant`; 2x2/3x3/4x4 only): the signed
+        /// volume scaling factor of the linear map. Zero (or near-zero)
+        /// means the matrix is singular — `inverse` will divide by it, so
+        /// test `det != 0` before inverting.
         pub fn determinant(self: Self) T {
             if (comptime C != R) @compileError("determinant requires a square matrix");
             if (comptime R == 2) {
@@ -184,7 +247,11 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             }
         }
 
-        /// GLM `inverse` — square matrices only (2x2, 3x3, 4x4).
+        /// Inverse (GLM `inverse`; square 2x2/3x3/4x4 only): the matrix `M` with
+        /// `M.mul(self) == identity()`. Computed via the cofactor
+        /// expansion, divided by the determinant — an ill-conditioned
+        /// (near-singular) matrix inverts to huge values. For rigid
+        /// transforms prefer `affineInverse`, which skips most of the work.
         pub fn inverse(self: Self) Self {
             if (comptime C != R) @compileError("inverse requires a square matrix");
             if (comptime R == 2) {
@@ -269,7 +336,11 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         // ---- transforms (4x4 only) ----
 
-        /// GLM `translate(m, v)`.
+        /// Append a translation by `v` (GLM `translate(m, v)`): rebuilds
+        /// column 3 as a linear combination of the existing columns, which
+        /// makes the translation live in the LOCAL frame of `self`. Compose
+        /// left-to-right: `m.identity().translate(t).rotate(θ, axis)` puts
+        /// the rotation around the translated origin.
         pub fn translate(self: Self, v: Vec(3, T)) Self {
             if (comptime C != 4 or R != 4) @compileError("translate requires a 4x4 matrix");
             var res = self;
@@ -280,7 +351,10 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return res;
         }
 
-        /// GLM `scale(m, v)`.
+        /// Append a non-uniform scale by `v` (GLM `scale(m, v)`): multiplies the
+        /// first three columns by the respective `v` components, keeping the
+        /// translation column untouched, so the scale is applied in the
+        /// local frame too. `scale(v)` with `v = (1,1,1)` is a no-op.
         pub fn scale(self: Self, v: Vec(3, T)) Self {
             if (comptime C != 4 or R != 4) @compileError("scale requires a 4x4 matrix");
             var res: Self = undefined;
@@ -291,7 +365,12 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return res;
         }
 
-        /// GLM `rotate(m, angle, axis)`.
+        /// Append a rotation of `angle` radians around `axis` (GLM
+        /// `rotate(m, angle, axis)`). The axis is normalized internally, its
+        /// sign (and thus the rotation handedness) follows the input; the
+        /// rotation is applied before `self`'s translation, i.e. around the
+        /// origin of `self`. Counter-clockwise for positive angles around
+        /// the positive axis (right-handed convention).
         pub fn rotate(self: Self, angle: T, axis: Vec(3, T)) Self {
             if (comptime C != 4 or R != 4) @compileError("rotate requires a 4x4 matrix");
             const c = scalar.cos(angle);
@@ -322,7 +401,11 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return res;
         }
 
-        /// GLM `mat -> mat4` conversion (reproduces GLM's historical padding).
+        /// Convert to a 4x4 matrix (GLM `mat4(mat)` constructor behavior):
+        /// smaller shapes are padded with zeroes and a `1` in the (3,3)
+        /// slot, reproducing GLM's historical padding quirks exactly
+        /// (verified against GLM 1.1 ref output). Use to lift a 2D/3D
+        /// transform into homogeneous space.
         pub fn toMat4(self: Self) Mat(4, 4, T) {
             if (comptime C == 4 and R == 4) return self;
             const c0 = self.data[0];
@@ -382,6 +465,9 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         // ---- printing ----
 
+        /// `{any}` formatter: prints elements in column-major order as
+        /// `{m00,m10,m20,m30,m01,...}` with `{d}` float formatting.
+        /// Enables `std.debug.print("{any}", .{m})` in logs and tests.
         pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             _ = fmt;
             _ = options;
@@ -396,15 +482,20 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         // ---- ext/matrix_common ----
 
-        /// Per-component abs (GLM `abs(mat)`).
+        /// Per-component absolute value (GLM `abs(mat)`): no linear algebra
+        /// meaning — just |element|, e.g. to compare transform magnitudes.
         pub inline fn abs(self: Self) Self {
             var res: Self = undefined;
             inline for (0..C) |c| res.data[c] = self.data[c].abs();
             return res;
         }
 
-        /// GLM `mix(x, y, a)` with a scalar or matrix interpolation factor.
-        /// For a matrix factor GLM uses elementwise `1 - a` (the 1 is a scalar).
+        /// Blend between `self` and `rhs` (GLM `mix(x, y, a)`):
+        /// - `a` scalar: per-element `x·(1−a) + y·a` (the linear lerp),
+        /// - `a` matrix: GLM's quirky elementwise formula
+        ///   `x · (ones() − a) + y · a` — note the `1` is a full ones
+        ///   matrix, NOT the identity, so off-diagonal elements blend too.
+        /// Use the scalar form to fade between two keyframe transforms.
         pub fn mix(self: Self, rhs: Self, a: anytype) Self {
             const AT = @TypeOf(a);
             if (comptime isMat(AT)) {
@@ -419,6 +510,12 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         // ---- ext/matrix_relational ----
 
+        /// Backend of the four tolerance comparisons: for each column c,
+        /// bits[c] is true iff the column vectors `self.data[c]` and
+        /// `rhs.data[c]` agree (need_all) or differ (any) within the
+        /// per-column tolerance `arg` — which may be a scalar or a vector
+        /// whose component c holds column c's tolerance. `ulp` selects the
+        /// ULP metric instead of the absolute epsilon.
         fn colCmp(self: Self, rhs: Self, comptime need_all: bool, arg: anytype, comptime ulp: bool) Vec(C, bool) {
             const AT = @TypeOf(arg);
             const av = comptime vec.isVec(AT);
@@ -448,34 +545,52 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             return .{ .v = res };
         }
 
-        /// GLM `equal(mat, mat)` — per-column all-of-component equality.
+        /// Exact per-column equality (GLM `equal(mat, mat)`): result column c is
+        /// true iff ALL components of columns c are exactly equal (bitwise
+        /// on floats). Intended for integer matrices; for float work use
+        /// `equalEps`/`equalULP` — exact equality is almost never what you
+        /// want after arithmetic.
         pub fn equal(self: Self, rhs: Self) Vec(C, bool) {
             var res: @Vector(C, bool) = undefined;
             inline for (0..C) |c| res[c] = self.data[c].equal(rhs.data[c]).all();
             return .{ .v = res };
         }
 
-        /// GLM `notEqual(mat, mat)`.
+        /// Per-column inequality (GLM `notEqual(mat, mat)`): result column c is
+        /// true iff ANY component of column c differs. The negation of
+        /// `equal`.
         pub fn notEqual(self: Self, rhs: Self) Vec(C, bool) {
             var res: @Vector(C, bool) = undefined;
             inline for (0..C) |c| res[c] = self.data[c].notEqual(rhs.data[c]).any();
             return .{ .v = res };
         }
 
-        /// GLM `equal(mat, mat, Epsilon)` — epsilon scalar or per-column vector.
+        /// Per-column tolerance equality (GLM `equal(mat, mat, eps)`): column c
+        /// is true iff every element of column c differs by < `eps[c]`
+        /// (eps vector) or < `eps` (scalar). The standard way to assert two
+        /// transform matrices are "the same" after floating-point work.
         pub fn equalEps(self: Self, rhs: Self, eps: anytype) Vec(C, bool) {
             return self.colCmp(rhs, true, eps, false);
         }
 
+        /// Per-column tolerance inequality (GLM `notEqual(mat, mat, eps)`):
+        /// column c is true iff some element of column c differs by at
+        /// least the given tolerance.
         pub fn notEqualEps(self: Self, rhs: Self, eps: anytype) Vec(C, bool) {
             return self.colCmp(rhs, false, eps, false);
         }
 
-        /// GLM `equal(mat, mat, MaxULPs)`.
+        /// Per-column ULP equality (GLM `equal(mat, mat, maxULPs)`): like
+        /// `equalEps`, but the tolerance is measured in representable float
+        /// steps, so it stays meaningful across exponent scales — use for
+        /// numerically-generated matrices (e.g. iterative inverses).
         pub fn equalULP(self: Self, rhs: Self, max_ulps: anytype) Vec(C, bool) {
             return self.colCmp(rhs, true, max_ulps, true);
         }
 
+        /// Per-column ULP inequality (GLM `notEqual(mat, mat, maxULPs)`): the
+        /// negation of `equalULP` — column c is true iff some element
+        /// exceeds the ULP budget.
         pub fn notEqualULP(self: Self, rhs: Self, max_ulps: anytype) Vec(C, bool) {
             return self.colCmp(rhs, false, max_ulps, true);
         }
@@ -488,9 +603,15 @@ fn comptimePrint(comptime fmt: []const u8, args: anytype) []const u8 {
 
 // ---- free functions (GLM ext/matrix_transform, ext/matrix_clip_space) ----
 
+/// The common matrix type used by all free functions below, matching
+/// GLM's default `glm::mat4` (4 columns, 4 rows, f32).
 const mat4 = Mat(4, 4, f32);
 
-/// GLM `lookAt` — default right-handed, NDC -1..1.
+/// Build a right-handed view matrix looking from `eye` toward `center`
+/// (GLM `lookAt`, default clip control RH with NDC in [-1, 1]): the
+/// basis is f = normalize(center−eye), s = f×up (side), u = s×f (up),
+/// then the eye is expressed in that basis. Use for the camera matrix of
+/// OpenGL-style renderers.
 pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     const f = center.sub(eye).normalize();
     const s = f.cross(up).normalize();
@@ -511,8 +632,11 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     return res;
 }
 
-/// GLM `lookAtLH` — left-handed, NDC -1..1.
-pub fn lookAtLH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
+/// Left-handed twin of `lookAt` (GLM `lookAtLH`, NDC in [-1, 1]): the
+        /// side vector is `up×f` and the forward axis keeps its sign, so
+        /// the z-axis points INTO the scene — use for DirectX-style (or
+        /// flipped-z) camera conventions.
+        pub fn lookAtLH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     const f = center.sub(eye).normalize();
     const s = up.cross(f).normalize();
     const u = f.cross(s);
@@ -532,8 +656,12 @@ pub fn lookAtLH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     return res;
 }
 
-/// GLM `perspective` — right-handed, NDC -1..1 (default clip control).
-pub fn perspective(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// Perspective projection (GLM `perspective`, default = right-handed,
+        /// NDC in [-1, 1]): maps a symmetric frustum with vertical field of
+        /// view `fovy` (radians) and `aspect = width/height` into clip
+        /// space, with the near plane at z = −zNear. This is the usual
+        /// OpenGL camera projection; Vulkan/Metal want the ZO variant.
+        pub fn perspective(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -544,9 +672,12 @@ pub fn perspective(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return res;
 }
 
-/// GLM `perspectiveRH_ZO` — right-handed, NDC 0..1.
-pub fn perspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-    const tan_half_fovy = scalar.tan(fovy / 2);
+/// Right-handed perspective with NDC z in [0, 1] (GLM
+        /// `perspectiveRH_ZO`): the depth output of Vulkan and Metal
+        /// (D3D-style) pipelines, so the depth buffer contains positive z
+        /// in [0, 1] with a reverse-friendly layout.
+        pub fn perspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+        const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
     res.data[1].v[1] = 1 / tan_half_fovy;
@@ -556,8 +687,11 @@ pub fn perspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return res;
 }
 
-/// GLM `perspectiveLH_ZO` — left-handed, NDC 0..1.
-pub fn perspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed perspective with NDC z in [0, 1] (GLM
+        /// `perspectiveLH_ZO`): z points into the scene, positive depth —
+        /// the combination used by many engines that flip z to get
+        /// right-handed rendering with a D3D-style depth range.
+        pub fn perspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -568,8 +702,12 @@ pub fn perspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return res;
 }
 
-/// GLM `ortho` — right-handed, NDC -1..1 (default clip control).
-pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Orthographic projection (GLM `ortho`, default = right-handed, NDC
+        /// [-1, 1]): maps the axis-aligned box [left,right]×[bottom,top]×
+        /// [zNear,zFar] linearly into clip space without perspective
+        /// division — use for 3D UI, minimaps, and 2D overlays (with
+        /// `ortho2D` when no depth range matters).
+        pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -581,8 +719,11 @@ pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32
     return res;
 }
 
-/// GLM `orthoRH_ZO` — right-handed, NDC 0..1.
-pub fn orthoRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed ortho with NDC z in [0, 1] (GLM `orthoRH_ZO`): the
+        /// depth half-range is compressed to [0, 1] with the near plane at
+        /// z = 0 — pair with `perspectiveRH_ZO` for consistent depth
+        /// conventions in a D3D-style renderer.
+        pub fn orthoRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -594,8 +735,12 @@ pub fn orthoRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar
     return res;
 }
 
-/// GLM `frustum` — right-handed, NDC -1..1 (default clip control).
-pub fn frustum(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Frustum projection (GLM `frustum`, default = right-handed, NDC
+        /// [-1, 1]): the general asymmetric perspective, defined by an
+        /// arbitrary near clipping rectangle instead of a symmetric fov.
+        /// Concave/degenerate boxes (left ≥ right etc.) produce singular
+        /// matrices; `perspective` is the common specialization.
+        pub fn frustum(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -607,19 +752,26 @@ pub fn frustum(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f
     return res;
 }
 
-/// GLM `lookAtRH` — same math as `lookAt` (default clip control is RH_NO).
-pub fn lookAtRH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
+/// Explicit right-handed view (GLM `lookAtRH`): GLM's default clip
+        /// control is RH + NDC [-1, 1], so this is numerically identical
+        /// to `lookAt` — kept for parity with GLM's API surface.
+        pub fn lookAtRH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     return lookAt(eye, center, up);
 }
 
-/// GLM `perspectiveRH_NO` — right-handed, NDC -1..1.
-pub fn perspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed perspective with NDC z in [-1, 1] (GLM
+        /// `perspectiveRH_NO`): GLM's default, therefore identical to
+        /// `perspective`; use OpenGL-style depth as usual.
+        pub fn perspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspective(fovy, aspect, zNear, zFar);
 }
 
-/// GLM `perspectiveLH_NO` — left-handed, NDC -1..1.
-pub fn perspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-    const tan_half_fovy = scalar.tan(fovy / 2);
+/// Left-handed perspective with NDC z in [-1, 1] (GLM
+        /// `perspectiveLH_NO`): forward is +z (into the scene) while depth
+        /// keeps OpenGL's symmetric range — matches the flipped-z trick
+        /// engines use for better precision without going ZO.
+        pub fn perspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+        const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
     res.data[1].v[1] = 1 / tan_half_fovy;
@@ -629,28 +781,38 @@ pub fn perspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return res;
 }
 
-/// GLM `perspectiveZO` (default: right-handed, ZO).
-pub fn perspectiveZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// Zoom-variant perspective (GLM `perspectiveZO`; default clip control
+        /// is RH so this equals `perspectiveRH_ZO`). Named for the NDC
+        /// [0, 1] depth range; use in Vulkan/Metal pipelines.
+        pub fn perspectiveZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveRH_ZO(fovy, aspect, zNear, zFar);
 }
 
-/// GLM `perspectiveNO` (default: right-handed, NO).
-pub fn perspectiveNO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// Negative-to-one NDC perspective (GLM `perspectiveNO`; equals
+        /// `perspective`, the OpenGL default). The "NO" = [-1, 1] depth
+        /// range convention that GLM's aliases default to.
+        pub fn perspectiveNO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspective(fovy, aspect, zNear, zFar);
 }
 
-/// GLM `perspectiveLH` (default clip control: NO).
-pub fn perspectiveLH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed perspective alias (GLM `perspectiveLH`; GLM's default
+        /// LH clip control is NO, so this equals `perspectiveLH_NO`).
+        pub fn perspectiveLH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveLH_NO(fovy, aspect, zNear, zFar);
 }
 
-/// GLM `perspectiveRH` (default clip control: NO).
-pub fn perspectiveRH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed perspective alias (GLM `perspectiveRH`; GLM's default
+        /// RH clip control is NO, so this equals `perspective`).
+        pub fn perspectiveRH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspective(fovy, aspect, zNear, zFar);
 }
 
-/// GLM `perspectiveFovRH_ZO` — fov in radians for a given width/height.
-pub fn perspectiveFovRH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed fov-from-size perspective with NDC z in [0, 1] (GLM
+        /// `perspectiveFovRH_ZO`): `fov` is the total vertical field of
+        /// view in radians, and the frustum is derived from a pixel
+        /// `width` × `height` instead of an aspect ratio — use for
+        /// render-to-texture cameras that must match a specific viewport.
+        pub fn perspectiveFovRH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -662,8 +824,10 @@ pub fn perspectiveFovRH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
-/// GLM `perspectiveFovRH_NO`.
-pub fn perspectiveFovRH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed fov-from-size perspective with NDC z in [-1, 1] (GLM
+        /// `perspectiveFovRH_NO`): like `perspectiveFovRH_ZO` but with
+        /// OpenGL's symmetric depth range.
+        pub fn perspectiveFovRH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -675,8 +839,10 @@ pub fn perspectiveFovRH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
-/// GLM `perspectiveFovLH_ZO`.
-pub fn perspectiveFovLH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed fov-from-size perspective with NDC z in [0, 1] (GLM
+        /// `perspectiveFovLH_ZO`): LH counterpart of `perspectiveFovRH_ZO`
+        /// with positive depth — matches D3D12/Metal depth ranges.
+        pub fn perspectiveFovLH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -688,8 +854,9 @@ pub fn perspectiveFovLH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
-/// GLM `perspectiveFovLH_NO`.
-pub fn perspectiveFovLH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed fov-from-size perspective with NDC z in [-1, 1] (GLM
+        /// `perspectiveFovLH_NO`): LH twin of `perspectiveFovRH_NO`.
+        pub fn perspectiveFovLH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -701,33 +868,42 @@ pub fn perspectiveFovLH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
-/// GLM `perspectiveFov` (default: right-handed, NO).
-pub fn perspectiveFov(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Fov-from-size perspective default (GLM `perspectiveFov`; RH + NDC
+        /// [-1, 1], so identical to `perspectiveFovRH_NO`).
+        pub fn perspectiveFov(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
 }
 
-/// GLM `perspectiveFovZO` (default: right-handed).
-pub fn perspectiveFovZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Fov-from-size perspective, zoom depth range (GLM `perspectiveFovZO`;
+        /// equals `perspectiveFovRH_ZO` under GLM's default RH control).
+        pub fn perspectiveFovZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_ZO(fov, width, height, zNear, zFar);
 }
 
-/// GLM `perspectiveFovNO` (default: right-handed).
-pub fn perspectiveFovNO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Fov-from-size perspective, negative-to-one depth (GLM
+        /// `perspectiveFovNO`; equals `perspectiveFovRH_NO`).
+        pub fn perspectiveFovNO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
 }
 
-/// GLM `perspectiveFovLH` (default clip control: NO).
-pub fn perspectiveFovLH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Fov-from-size perspective, left-handed (GLM `perspectiveFovLH`;
+        /// GLM's LH default is NO, so this equals `perspectiveFovLH_NO`).
+        pub fn perspectiveFovLH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovLH_NO(fov, width, height, zNear, zFar);
 }
 
-/// GLM `perspectiveFovRH` (default clip control: NO).
-pub fn perspectiveFovRH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// Fov-from-size perspective, right-handed (GLM `perspectiveFovRH`;
+        /// equals `perspectiveFovRH_NO` under GLM's RH default).
+        pub fn perspectiveFovRH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
 }
 
-/// GLM `infinitePerspectiveRH_NO` — infinite far plane, NDC -1..1.
-pub fn infinitePerspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// Infinite-far-plane perspective, right-handed, NDC [-1, 1] (GLM
+        /// `infinitePerspectiveRH_NO`): zFar is dropped, the depth
+        /// function maps zNear to the far end of the range and everything
+        /// beyond it — good for starfields, large outdoor scenes and
+        /// reverse-z setups that must never clip at a finite distance.
+        pub fn infinitePerspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -742,8 +918,11 @@ pub fn infinitePerspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return res;
 }
 
-/// GLM `infinitePerspectiveRH_ZO`.
-pub fn infinitePerspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// Infinite-far-plane perspective, right-handed, NDC [0, 1] (GLM
+        /// `infinitePerspectiveRH_ZO`): like the NO variant but with
+        /// Vulkan/Metal depth conventions; note the depth at zNear is 0,
+        /// so a reverse-z depth buffer pairs naturally.
+        pub fn infinitePerspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -758,8 +937,10 @@ pub fn infinitePerspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return res;
 }
 
-/// GLM `infinitePerspectiveLH_NO`.
-pub fn infinitePerspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// Infinite-far-plane perspective, left-handed, NDC [-1, 1] (GLM
+        /// `infinitePerspectiveLH_NO`): LH twin of the RH_NO variant, for
+        /// +z-forward engines that need unlimited draw distance.
+        pub fn infinitePerspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -774,8 +955,10 @@ pub fn infinitePerspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return res;
 }
 
-/// GLM `infinitePerspectiveLH_ZO`.
-pub fn infinitePerspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// Infinite-far-plane perspective, left-handed, NDC [0, 1] (GLM
+        /// `infinitePerspectiveLH_ZO`): LH + ZO combination, e.g. for
+        /// D3D12-style pipelines with unlimited far distance.
+        pub fn infinitePerspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -790,13 +973,18 @@ pub fn infinitePerspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return res;
 }
 
-/// GLM `infinitePerspective` (default: right-handed, NO).
-pub fn infinitePerspective(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// Infinite perspective default (GLM `infinitePerspective`; RH + NDC
+        /// [-1, 1], identical to `infinitePerspectiveRH_NO`).
+        pub fn infinitePerspective(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return infinitePerspectiveRH_NO(fovy, aspect, zNear);
 }
 
-/// GLM `tweakedInfinitePerspective(fovy, aspect, zNear, ep)` — Lengyel's tweak.
-pub fn tweakedInfinitePerspective(fovy: f32, aspect: f32, zNear: f32, ep: f32) mat4 {
+/// Infinite perspective with Lengyel's tweak (GLM
+        /// `tweakedInfinitePerspective(fovy, aspect, zNear, ep)`): the
+        /// `ep` parameter (usually machine epsilon) replaces the far
+        /// plane, removing the depth compression singularity that plain
+        /// infinite projections suffer at z → zNear.
+        pub fn tweakedInfinitePerspective(fovy: f32, aspect: f32, zNear: f32, ep: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -811,13 +999,18 @@ pub fn tweakedInfinitePerspective(fovy: f32, aspect: f32, zNear: f32, ep: f32) m
     return res;
 }
 
-/// GLM `tweakedInfinitePerspective(fovy, aspect, zNear)` — ep = machine epsilon.
-pub fn tweakedInfinitePerspectiveDefault(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// `tweakedInfinitePerspective` with `ep = f32 epsilon` (GLM
+        /// `tweakedInfinitePerspectiveDefault`): the recommended instant;
+        /// just pass fov/aspect/zNear.
+        pub fn tweakedInfinitePerspectiveDefault(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return tweakedInfinitePerspective(fovy, aspect, zNear, std.math.floatEps(f32));
 }
 
-/// GLM `ortho(left, right, bottom, top)` — 2D, no depth range.
-pub fn ortho2D(left: f32, right: f32, bottom: f32, top: f32) mat4 {
+/// 2D orthographic projection (GLM `ortho(left, right, bottom, top)`):
+        /// the z axis is left alone (depth -1..1 as identity) — the
+        /// standard matrix for flat 2D rendering, UI overlays and screen
+        /// space coordinates in pixels.
+        pub fn ortho2D(left: f32, right: f32, bottom: f32, top: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -827,8 +1020,10 @@ pub fn ortho2D(left: f32, right: f32, bottom: f32, top: f32) mat4 {
     return res;
 }
 
-/// GLM `orthoLH_ZO`.
-pub fn orthoLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed ortho with NDC z in [0, 1] (GLM `orthoLH_ZO`): depth
+        /// maps zNear → 0, zFar → 1 with +z forward — the D3D12-style
+        /// ortho to pair with `perspectiveLH_ZO`.
+        pub fn orthoLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -839,8 +1034,9 @@ pub fn orthoLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar
     return res;
 }
 
-/// GLM `orthoLH_NO`.
-pub fn orthoLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed ortho with NDC z in [-1, 1] (GLM `orthoLH_NO`): +z
+        /// forward with OpenGL's symmetric depth range.
+        pub fn orthoLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -851,8 +1047,9 @@ pub fn orthoLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar
     return res;
 }
 
-/// GLM `orthoRH_NO`.
-pub fn orthoRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed ortho with NDC z in [-1, 1] (GLM `orthoRH_NO`): the
+        /// OpenGL-style default, identical math to `ortho` itself.
+        pub fn orthoRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -863,28 +1060,34 @@ pub fn orthoRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar
     return res;
 }
 
-/// GLM `orthoZO` (default: right-handed).
-pub fn orthoZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Zoom-depth ortho (GLM `orthoZO`; equals `orthoRH_ZO` under GLM's RH
+        /// default). Alias for parity with the ZO/NO naming.
+        pub fn orthoZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoRH_ZO(left, right, bottom, top, zNear, zFar);
 }
 
-/// GLM `orthoNO` (default: right-handed).
-pub fn orthoNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Negative-to-one-depth ortho (GLM `orthoNO`; equals `orthoRH_NO`,
+        /// the OpenGL default). Alias for parity with the ZO/NO naming.
+        pub fn orthoNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
-/// GLM `orthoLH` (default clip control: NO).
-pub fn orthoLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed ortho alias (GLM `orthoLH`; GLM's LH default is NO, so
+        /// this equals `orthoLH_NO`).
+        pub fn orthoLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoLH_NO(left, right, bottom, top, zNear, zFar);
 }
 
-/// GLM `orthoRH` (default clip control: NO).
-pub fn orthoRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed ortho alias (GLM `orthoRH`; equals `orthoRH_NO`, the
+        /// OpenGL default).
+        pub fn orthoRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
-/// GLM `frustumLH_ZO`.
-pub fn frustumLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed asymmetric frustum with NDC z in [0, 1] (GLM
+        /// `frustumLH_ZO`): +z forward, zNear → 0. Useful for asymmetric
+        /// near planes (e.g. off-axis projection) in D3D-style pipelines.
+        pub fn frustumLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -896,8 +1099,9 @@ pub fn frustumLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zF
     return res;
 }
 
-/// GLM `frustumLH_NO`.
-pub fn frustumLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed asymmetric frustum with NDC z in [-1, 1] (GLM
+        /// `frustumLH_NO`): +z forward with OpenGL's symmetric depth.
+        pub fn frustumLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -909,8 +1113,10 @@ pub fn frustumLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zF
     return res;
 }
 
-/// GLM `frustumRH_ZO`.
-pub fn frustumRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed asymmetric frustum with NDC z in [0, 1] (GLM
+        /// `frustumRH_ZO`): −z forward, zNear → 0 — Vulkan/Metal variant
+        /// for off-axis projections (CAVE/portal rendering).
+        pub fn frustumRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -922,8 +1128,10 @@ pub fn frustumRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zF
     return res;
 }
 
-/// GLM `frustumRH_NO`.
-pub fn frustumRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed asymmetric frustum with NDC z in [-1, 1] (GLM
+        /// `frustumRH_NO`): the OpenGL default, identical math to
+        /// `frustum`.
+        pub fn frustumRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -935,30 +1143,39 @@ pub fn frustumRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zF
     return res;
 }
 
-/// GLM `frustumZO` (default: right-handed).
-pub fn frustumZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Zoom-depth frustum (GLM `frustumZO`; equals `frustumRH_ZO` under RH
+        /// default). Alias for ZO/NO parity.
+        pub fn frustumZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumRH_ZO(left, right, bottom, top, zNear, zFar);
 }
 
-/// GLM `frustumNO` (default: right-handed).
-pub fn frustumNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Negative-to-one-depth frustum (GLM `frustumNO`; equals
+        /// `frustumRH_NO`). Alias for ZO/NO parity.
+        pub fn frustumNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
-/// GLM `frustumLH` (default clip control: NO).
-pub fn frustumLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Left-handed frustum alias (GLM `frustumLH`; GLM's LH default is NO,
+        /// so this equals `frustumLH_NO`).
+        pub fn frustumLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumLH_NO(left, right, bottom, top, zNear, zFar);
 }
 
-/// GLM `frustumRH` (default clip control: NO).
-pub fn frustumRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// Right-handed frustum alias (GLM `frustumRH`; equals
+        /// `frustumRH_NO`, the OpenGL default).
+        pub fn frustumRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
 // ---- GLM ext/matrix_projection ----
 
-/// GLM `projectZO(obj, model, proj, viewport)` — NDC 0..1.
-pub fn projectZO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+        /// Project a world-space point to window space with NDC z in
+        /// [0, 1] (GLM `projectZO(obj, model, proj, viewport)`):
+        /// `obj` is transformed by `model * proj`, mapped through the
+        /// viewport rect (x, y, width, height) and returned as screen
+        /// coordinates with depth in [0, 1]. Note GLM/MathML: with ZO
+        /// projections the returned z is clip-relative, not viewport-raw.
+        pub fn projectZO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     var tmp = proj.mulVec(model.mulVec(Vec(4, f32).init(.{ obj.v[0], obj.v[1], obj.v[2], 1 })));
     tmp = tmp.div(tmp.v[3]);
     tmp.v[0] = tmp.v[0] * 0.5 + 0.5;
@@ -968,8 +1185,12 @@ pub fn projectZO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32
     return Vec(3, f32).init(.{ tmp.v[0], tmp.v[1], tmp.v[2] });
 }
 
-/// GLM `projectNO(obj, model, proj, viewport)` — NDC -1..1.
-pub fn projectNO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// Project a world-space point to window space with NDC z in [-1, 1]
+        /// (GLM `projectNO(obj, model, proj, viewport)`): the OpenGL
+        /// counterpart of `projectZO` — screen x/y (pixels) plus the raw
+        /// viewport-unmapped depth in NDC [-1, 1]. Feed the result of
+        /// `project`/`projectNO` into `unProjectNO` to round-trip.
+        pub fn projectNO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     var tmp = proj.mulVec(model.mulVec(Vec(4, f32).init(.{ obj.v[0], obj.v[1], obj.v[2], 1 })));
     tmp = tmp.div(tmp.v[3]);
     tmp = tmp.mul(0.5).add(0.5);
@@ -978,13 +1199,19 @@ pub fn projectNO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32
     return Vec(3, f32).init(.{ tmp.v[0], tmp.v[1], tmp.v[2] });
 }
 
-/// GLM `project` (default clip control: NO).
-pub fn project(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// Projection default (GLM `project`; GLM's default clip control is NO,
+        /// so this equals `projectNO`) — world point → screen pixels +
+        /// OpenGL-style depth.
+        pub fn project(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     return projectNO(obj, model, proj, viewport);
 }
 
-/// GLM `unProjectZO(win, model, proj, viewport)`.
-pub fn unProjectZO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// Unproject a window-space point to world space with NDC z in [0, 1]
+        /// (GLM `unProjectZO(win, model, proj, viewport)`): the inverse of
+        /// `projectZO` — invert the `proj * model` chain, undo the viewport
+        /// mapping and perspective division. Use for mouse picking in
+        /// Vulkan/Metal-style pipelines.
+        pub fn unProjectZO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     const inv = proj.mul(model).inverse();
     var tmp: Vec(4, f32) = undefined;
     tmp.v[0] = win.v[0];
@@ -1000,8 +1227,11 @@ pub fn unProjectZO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f
     return Vec(3, f32).init(.{ obj.v[0], obj.v[1], obj.v[2] });
 }
 
-/// GLM `unProjectNO(win, model, proj, viewport)`.
-pub fn unProjectNO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// Unproject a window-space point to world space with NDC z in [-1, 1]
+        /// (GLM `unProjectNO(win, model, proj, viewport)`): the OpenGL
+        /// counterpart of `unProjectZO` — use for mouse picking with
+        /// OpenGL-style depth buffers.
+        pub fn unProjectNO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     const inv = proj.mul(model).inverse();
     var tmp: Vec(4, f32) = undefined;
     tmp.v[0] = win.v[0];
@@ -1016,13 +1246,19 @@ pub fn unProjectNO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f
     return Vec(3, f32).init(.{ obj.v[0], obj.v[1], obj.v[2] });
 }
 
-/// GLM `unProject` (default clip control: NO).
-pub fn unProject(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// Unprojection default (GLM `unProject`; equals `unProjectNO` under
+        /// GLM's NO default).
+        pub fn unProject(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     return unProjectNO(win, model, proj, viewport);
 }
 
-/// GLM `pickMatrix(center, delta, viewport)`.
-pub fn pickMatrix(center: Vec(2, f32), delta: Vec(2, f32), viewport: Vec(4, f32)) mat4 {
+/// Build a picking matrix (GLM `pickMatrix(center, delta, viewport)`):
+        /// a translate+scale that isolates the `delta`×`delta` region
+        /// around `center` (both in window pixels) as the new frustum —
+        /// combine with rendering a second pass of the scene to implement
+        /// rubber-band selection. Returns identity if delta is not
+        /// positive.
+        pub fn pickMatrix(center: Vec(2, f32), delta: Vec(2, f32), viewport: Vec(4, f32)) mat4 {
     var res = mat4.identity();
     if (!(delta.v[0] > 0 and delta.v[1] > 0)) return res;
     const temp = Vec(3, f32).init(.{
@@ -1036,8 +1272,12 @@ pub fn pickMatrix(center: Vec(2, f32), delta: Vec(2, f32), viewport: Vec(4, f32)
 
 // ---- GLM gtc/matrix_inverse ----
 
-/// GLM `affineInverse` for 3x3 — 2x2 inverse of the upper-left, no translation.
-pub fn affineInverse3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
+        /// Inverse of a 3x3 affine (rotation+translation) matrix (GLM
+        /// `affineInverse`): the upper-left 2x2 is inverted in isolation
+        /// and the translation column of the result is placed in the third
+        /// column; the bottom row is implicitly [0, 0, 1]. Only valid when
+        /// the matrix really is affine — cheaper than a full `inverse`.
+        pub fn affineInverse3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
     const inv22 = Mat(2, 2, f32).init(.{
         Vec(2, f32).init(.{ m.data[0].v[0], m.data[0].v[1] }),
         Vec(2, f32).init(.{ m.data[1].v[0], m.data[1].v[1] }),
@@ -1051,8 +1291,12 @@ pub fn affineInverse3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
     });
 }
 
-/// GLM `affineInverse` for 4x4.
-pub fn affineInverse(m: mat4) mat4 {
+/// Inverse of a 4x4 affine matrix (GLM `affineInverse`): inverts the
+        /// upper-left 3x3 and folds the translation in as `−R⁻¹·t`; bottom
+        /// row stays [0, 0, 0, 1]. The right tool for view/model matrices
+        /// (rigid body transforms) — an order of magnitude less work than
+        /// the full cofactor `inverse`.
+        pub fn affineInverse(m: mat4) mat4 {
     const inv33 = Mat(3, 3, f32).init(.{
         Vec(3, f32).init(.{ m.data[0].v[0], m.data[0].v[1], m.data[0].v[2] }),
         Vec(3, f32).init(.{ m.data[1].v[0], m.data[1].v[1], m.data[1].v[2] }),
@@ -1068,8 +1312,12 @@ pub fn affineInverse(m: mat4) mat4 {
     });
 }
 
-/// GLM `inverseTranspose` 2x2 — note GLM 1.1.0 returns the inverse here (not transposed).
-pub fn inverseTranspose2(m: Mat(2, 2, f32)) Mat(2, 2, f32) {
+/// 2x2 inverse-transpose (GLM `inverseTranspose`, gtc/matrix_inverse):
+        /// NOTE — in GLM 1.1.0 this function returns the plain inverse for
+        /// 2x2 (the transpose step is missing upstream), and this port
+        /// deliberately reproduces GLM's output. For the mathematically
+        /// correct normal matrix of a 2D transform, transpose the result.
+        pub fn inverseTranspose2(m: Mat(2, 2, f32)) Mat(2, 2, f32) {
     const d = m.determinant();
     return Mat(2, 2, f32).init(.{
         Vec(2, f32).init(.{ m.data[1].v[1] / d, -m.data[0].v[1] / d }),
@@ -1077,8 +1325,12 @@ pub fn inverseTranspose2(m: Mat(2, 2, f32)) Mat(2, 2, f32) {
     });
 }
 
-/// GLM `inverseTranspose` 3x3.
-pub fn inverseTranspose3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
+/// 3x3 inverse-transpose (GLM `inverseTranspose`, gtc/matrix_inverse):
+        /// `(M⁻¹)ᵀ`, computed directly as the transposed cofactor matrix
+        /// divided by the determinant. This is the "normal matrix" to
+        /// transform surface normals so they stay perpendicular after a
+        /// non-uniform scale.
+        pub fn inverseTranspose3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
     const determinant =
         m.data[0].v[0] * (m.data[1].v[1] * m.data[2].v[2] - m.data[1].v[2] * m.data[2].v[1]) -
         m.data[0].v[1] * (m.data[1].v[0] * m.data[2].v[2] - m.data[1].v[2] * m.data[2].v[0]) +
@@ -1100,8 +1352,11 @@ pub fn inverseTranspose3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
     return res;
 }
 
-/// GLM `inverseTranspose` 4x4.
-pub fn inverseTranspose(m: mat4) mat4 {
+/// 4x4 inverse-transpose (GLM `inverseTranspose`, gtc/matrix_inverse):
+        /// `(M⁻¹)ᵀ` via the transposed cofactor expansion divided by the
+        /// determinant — the standard normal matrix for 3D rendering with
+        /// skewed or non-uniformly scaled models.
+        pub fn inverseTranspose(m: mat4) mat4 {
     const sf00 = m.data[2].v[2] * m.data[3].v[3] - m.data[3].v[2] * m.data[2].v[3];
     const sf01 = m.data[2].v[1] * m.data[3].v[3] - m.data[3].v[1] * m.data[2].v[3];
     const sf02 = m.data[2].v[1] * m.data[3].v[2] - m.data[3].v[1] * m.data[2].v[2];
@@ -1154,7 +1409,15 @@ pub fn inverseTranspose(m: mat4) mat4 {
     }
     return res;
 }
-pub fn outerProduct(c: anytype, r: anytype) Mat(@TypeOf(r).len, @TypeOf(c).len, @TypeOf(c).value_type) {
+// ---- GLM func_common `outerProduct` ----
+
+        /// Outer product (GLM/GLSL `outerProduct(c, r)`): column vector `c`
+        /// times row vector `r`, yielding the matrix `res[j][i] =
+        /// c[i]*r[j]` — shaped `Mat(r.len, c.len)`, i.e. `c.len` rows and
+        /// `r.len` columns. The dual of the dot product: builds a rank-1
+        /// matrix such as the projector `outerProduct(n, n)` or the dyad
+        /// `I − 2·outerProduct(n, n)` used in reflections.
+        pub fn outerProduct(c: anytype, r: anytype) Mat(@TypeOf(r).len, @TypeOf(c).len, @TypeOf(c).value_type) {
     const T = @TypeOf(c).value_type;
     const CL = @TypeOf(c).len;
     const RL = @TypeOf(r).len;
