@@ -50,8 +50,8 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         }
 
         /// Vector with every component set to `v`: `vec3.fill(0.5)`.
-        pub inline fn fill(v: anytype) Self {
-            return .{ .v = @splat(scalar.cast(T, v)) };
+        pub inline fn fill(value: anytype) Self {
+            return .{ .v = @splat(scalar.cast(T, value)) };
         }
 
         /// Basis vector with a single `1` at component `i` (0-based):
@@ -113,8 +113,8 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         }
 
         /// Write component `i` of a mutable vector: `v.set(2, 3.0)`.
-        pub inline fn set(self: *Self, i: usize, val: T) void {
-            self.v[i] = val;
+        pub inline fn set(self: *Self, i: usize, value: T) void {
+            self.v[i] = value;
         }
 
         /// First component (x). GLSL `.x` selector.
@@ -141,26 +141,26 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         }
 
         /// Set the first component of a mutable vector.
-        pub inline fn setX(self: *Self, val: T) void {
-            self.v[0] = val;
+        pub inline fn setX(self: *Self, value: T) void {
+            self.v[0] = value;
         }
 
         /// Set the second component of a mutable vector.
-        pub inline fn setY(self: *Self, val: T) void {
+        pub inline fn setY(self: *Self, value: T) void {
             if (comptime L < 2) @compileError("vector has no y component");
-            self.v[1] = val;
+            self.v[1] = value;
         }
 
         /// Set the third component of a mutable vector.
-        pub inline fn setZ(self: *Self, val: T) void {
+        pub inline fn setZ(self: *Self, value: T) void {
             if (comptime L < 3) @compileError("vector has no z component");
-            self.v[2] = val;
+            self.v[2] = value;
         }
 
         /// Set the fourth component of a mutable vector.
-        pub inline fn setW(self: *Self, val: T) void {
+        pub inline fn setW(self: *Self, value: T) void {
             if (comptime L < 4) @compileError("vector has no w component");
-            self.v[3] = val;
+            self.v[3] = value;
         }
 
         // ---- swizzles ----
@@ -168,14 +168,14 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Build a 2-component vector from components `a` and `b`. This is
         /// the GLSL swizzle mechanism: `v.zy()` reorders lanes; the source
         /// vector is copied, never modified.
-        inline fn swz2(self: Self, comptime a: usize, comptime b: usize) Vec(2, T) {
-            return .{ .v = @Vector(2, T){ self.v[a], self.v[b] } };
+        inline fn swz2(self: Self, comptime index1: usize, comptime index2: usize) Vec(2, T) {
+            return .{ .v = @Vector(2, T){ self.v[index1], self.v[index2] } };
         }
 
         /// Build a 3-component vector from any three components of `self`
         /// (GLSL swizzle, e.g. `v.zxy()`). Copies, never reorders in place.
-        inline fn swz3(self: Self, comptime a: usize, comptime b: usize, comptime c: usize) Vec(3, T) {
-            return .{ .v = @Vector(3, T){ self.v[a], self.v[b], self.v[c] } };
+        inline fn swz3(self: Self, comptime index1: usize, comptime index2: usize, comptime index3: usize) Vec(3, T) {
+            return .{ .v = @Vector(3, T){ self.v[index1], self.v[index2], self.v[index3] } };
         }
 
         /// Components (x, y) as a 2-vector: the standard way to drop z/w.
@@ -264,24 +264,24 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Apply unary scalar function `f` to every component:
         /// `v.apply(scalar.sin)` == `v.sin()`. Backend used by most
         /// per-component methods.
-        fn apply(self: Self, comptime f: anytype) Self {
+        fn apply(self: Self, comptime func: anytype) Self {
             var r: storage_type = undefined;
-            inline for (0..L) |i| r[i] = f(self.v[i]);
+            inline for (0..L) |i| r[i] = func(self.v[i]);
             return .{ .v = r };
         }
 
         /// Apply binary scalar function `f(self[i], b)` per component; `b`
         /// may be a full vector (component-wise) or a scalar (broadcast to
         /// every lane). Backend of min/max/pow/fmin, etc.
-        fn apply2(self: Self, b: anytype, comptime f: anytype) Self {
-            const BT = @TypeOf(b);
+        fn apply2(self: Self, rhs: anytype, comptime func: anytype) Self {
+            const BT = @TypeOf(rhs);
             if (comptime isVec(BT)) {
                 var r: storage_type = undefined;
-                inline for (0..L) |i| r[i] = f(self.v[i], b.v[i]);
+                inline for (0..L) |i| r[i] = func(self.v[i], rhs.v[i]);
                 return .{ .v = r };
             } else {
                 var r: storage_type = undefined;
-                inline for (0..L) |i| r[i] = f(self.v[i], b);
+                inline for (0..L) |i| r[i] = func(self.v[i], rhs);
                 return .{ .v = r };
             }
         }
@@ -290,16 +290,16 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// with mixed vector/scalar operands; the receiver is passed last so
         /// that `self.clamp(lo, hi)` == GLM `clamp(self, lo, hi)`. Backend of
         /// clamp/smoothstep/fclamp.
-        fn apply3(self: Self, b: anytype, c: anytype, comptime f: anytype) Self {
-            const BT = @TypeOf(b);
-            const CT = @TypeOf(c);
+        fn apply3(self: Self, rhs1: anytype, rhs2: anytype, comptime func: anytype) Self {
+            const BT = @TypeOf(rhs1);
+            const CT = @TypeOf(rhs2);
             const bv = comptime isVec(BT);
             const cv = comptime isVec(CT);
             var r: storage_type = undefined;
             inline for (0..L) |i| {
-                const bi = if (bv) b.v[i] else b;
-                const ci = if (cv) c.v[i] else c;
-                r[i] = f(bi, ci, self.v[i]);
+                const bi = if (bv) rhs1.v[i] else rhs1;
+                const ci = if (cv) rhs2.v[i] else rhs2;
+                r[i] = func(bi, ci, self.v[i]);
             }
             return .{ .v = r };
         }
@@ -488,12 +488,12 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Component-wise clamp into [lo, hi] (GLM `clamp`). `lo`/`hi` may
         /// each be vectors or scalars, mixed freely. `mix` order differs
         /// from GLSL: this is `clamp(x, lo, hi)`.
-        pub inline fn clamp(self: Self, lo: anytype, hi: anytype) Self {
-            return self.apply3(lo, hi, clampHelper);
+        pub inline fn clamp(self: Self, min_val: anytype, max_val: anytype) Self {
+            return self.apply3(min_val, max_val, clampHelper);
         }
 
-        fn clampHelper(lo: anytype, hi: anytype, v: anytype) @TypeOf(v) {
-            return scalar.clamp(v, lo, hi);
+        fn clampHelper(min_val: anytype, max_val: anytype, value: anytype) @TypeOf(value) {
+            return scalar.clamp(value, min_val, max_val);
         }
 
         /// Linear interpolation between the receiver and `rhs` by factor `a`
@@ -504,17 +504,17 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// - `a` vector: per-component factors,
         /// - `a` bool (or bool vector): selects component-wise with no
         ///   interpolation (`a` true picks `rhs`). Same effect as `if`.
-        pub fn mix(self: Self, rhs: anytype, a: anytype) Self {
-            const AT = @TypeOf(a);
-            if (comptime AT == bool) return if (a) rhs else self;
+        pub fn mix(self: Self, rhs: anytype, factor: anytype) Self {
+            const AT = @TypeOf(factor);
+            if (comptime AT == bool) return if (factor) rhs else self;
             const RT = @TypeOf(rhs);
             const av = comptime isVec(AT);
             const rv = comptime isVec(RT);
             var r: storage_type = undefined;
             inline for (0..L) |i| {
                 const ri = if (rv) rhs.v[i] else rhs;
-                const ai = if (av) a.v[i] else a;
-                r[i] = scalar.mix(self.v[i], ri, ai);
+                const factor_i = if (av) factor.v[i] else factor;
+                r[i] = scalar.mix(self.v[i], ri, factor_i);
             }
             return .{ .v = r };
         }
@@ -537,19 +537,19 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Per-component smoothstep (GLM `smoothstep(e0, e1, self)`): 0 at
         /// `e0`, 1 at `e1` with a Hermite (2t³−3t²) ramp in between. Ideal
         /// for easing transitions; where t leaves [e0,e1] the result clamps.
-        pub inline fn smoothstep(self: Self, e0: anytype, e1: anytype) Self {
-            return self.apply3(e0, e1, scalar.smoothstep);
+        pub inline fn smoothstep(self: Self, edge0: anytype, edge1: anytype) Self {
+            return self.apply3(edge0, edge1, scalar.smoothstep);
         }
 
         /// Component-wise fused multiply-add: `self·rhs + c` with a single
         /// rounding. `rhs`/`c` may be vectors or scalars (both vector → SIMD
         /// `@mulAdd`, mixed → per-lane scalar path).
-        pub inline fn fma(self: Self, rhs: anytype, c: anytype) Self {
+        pub inline fn fma(self: Self, rhs: anytype, addend: anytype) Self {
             const RT = @TypeOf(rhs);
-            const CT = @TypeOf(c);
+            const CT = @TypeOf(addend);
             if (comptime isVec(RT) and isVec(CT))
-                return .{ .v = @mulAdd(storage_type, self.v, rhs.v, c.v) };
-            return self.apply3(rhs, c, scalar.fma);
+                return .{ .v = @mulAdd(storage_type, self.v, rhs.v, addend.v) };
+            return self.apply3(rhs, addend, scalar.fma);
         }
 
         /// Split each component into fractional and integral parts
@@ -585,13 +585,13 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Component-wise `x · 2^e` (GLM `ldexp`, GLSL `ldexp(x, exp)`).
         /// `e` may be a vector of ints or a single int. The inverse of
         /// `frexp`: `v.frexp().significand.ldexp(v.frexp().exponent) == v`.
-        pub fn ldexp(self: Self, e: anytype) Self {
-            const ET = @TypeOf(e);
+        pub fn ldexp(self: Self, exponent: anytype) Self {
+            const ET = @TypeOf(exponent);
             var r: storage_type = undefined;
             if (comptime isVec(ET)) {
-                inline for (0..L) |i| r[i] = scalar.ldexp(self.v[i], e.v[i]);
+                inline for (0..L) |i| r[i] = scalar.ldexp(self.v[i], exponent.v[i]);
             } else {
-                inline for (0..L) |i| r[i] = scalar.ldexp(self.v[i], e);
+                inline for (0..L) |i| r[i] = scalar.ldexp(self.v[i], exponent);
             }
             return .{ .v = r };
         }
@@ -760,8 +760,8 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// vectors the result is the cosine of the angle between them;
         /// `n.dot(d)` with a plane normal answers which side of a plane a
         /// direction is on (see `faceforward`).
-        pub inline fn dot(self: Self, b: Self) T {
-            return @reduce(.Add, self.v * b.v);
+        pub inline fn dot(self: Self, rhs: Self) T {
+            return @reduce(.Add, self.v * rhs.v);
         }
 
         /// Euclidean length `√(x·x)` (GLM `length`). Computed in the
@@ -776,20 +776,20 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Distance between two points (GLM `distance`): `(a - b).length()`.
         /// For comparing distances prefer `lengthSquared`-style checks
         /// (`a.sub(b).dot(a.sub(b))`) when the square root can be avoided.
-        pub inline fn distance(self: Self, b: Self) float_type {
-            return self.sub(b).length();
+        pub inline fn distance(self: Self, rhs: Self) float_type {
+            return self.sub(rhs).length();
         }
 
         /// Cross product, 3D only (GLM `cross`): a vector perpendicular to
         /// both operands whose length equals the parallelogram area. Handed
         /// right-handed, matching GLM; aggregate into `mat4`-style rotation
         /// bases with `normalize`.
-        pub fn cross(self: Self, b: Self) Self {
+        pub fn cross(self: Self, rhs: Self) Self {
             if (comptime L != 3) @compileError("cross is only defined for 3-component vectors");
             return .{ .v = @Vector(3, T){
-                self.v[1] * b.v[2] - self.v[2] * b.v[1],
-                self.v[2] * b.v[0] - self.v[0] * b.v[2],
-                self.v[0] * b.v[1] - self.v[1] * b.v[0],
+                self.v[1] * rhs.v[2] - self.v[2] * rhs.v[1],
+                self.v[2] * rhs.v[0] - self.v[0] * rhs.v[2],
+                self.v[0] * rhs.v[1] - self.v[1] * rhs.v[0],
             } };
         }
 
@@ -811,15 +811,15 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `faceforward(N, I, Nref)`): returns `self` if `I·Nref < 0`,
         /// otherwise `-self`. For example, flip a surface normal so it
         /// points at the camera: `normal.faceforward(view_dir, normal_ref)`.
-        pub inline fn faceforward(self: Self, i: Self, nref: Self) Self {
-            return if (nref.dot(i) < 0) self else self.neg();
+        pub inline fn faceforward(self: Self, incident: Self, normal_ref: Self) Self {
+            return if (normal_ref.dot(incident) < 0) self else self.neg();
         }
 
         /// Reflect an incident vector `self` about a normal `n` (GLM
         /// `reflect(I, N)`): `I - 2·(I·N)·N`. `n` should be normalized;
         /// result is the mirror of `self` across the plane with normal `n`.
-        pub inline fn reflect(self: Self, n: Self) Self {
-            return self.sub(n.mul(self.dot(n)).mul(@as(T, 2)));
+        pub inline fn reflect(self: Self, normal: Self) Self {
+            return self.sub(normal.mul(self.dot(normal)).mul(@as(T, 2)));
         }
 
         /// Refract an incident vector `self` at a surface with normal `n`
@@ -827,12 +827,12 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `refract(I, N, IOR₁/IOR₂)`). Returns the zero vector when total
         /// internal reflection occurs (k < 0). Handy for simulating glass
         /// or water rays without a full ray tracer.
-        pub fn refract(self: Self, n: Self, eta: anytype) Self {
-            const et: T = scalar.cast(T, eta);
-            const dot_value = self.dot(n);
-            const k = @as(T, 1) - et * et * (@as(T, 1) - dot_value * dot_value);
+        pub fn refract(self: Self, normal: Self, index_ratio: anytype) Self {
+            const ratio: T = scalar.cast(T, index_ratio);
+            const dot_value = self.dot(normal);
+            const k = @as(T, 1) - ratio * ratio * (@as(T, 1) - dot_value * dot_value);
             if (k < 0) return Self.zero();
-            return self.mul(et).sub(n.mul(scalar.sqrt(k) + et * dot_value));
+            return self.mul(ratio).sub(normal.mul(scalar.sqrt(k) + ratio * dot_value));
         }
 
         // ---- integer / bit ----
@@ -939,13 +939,13 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         }
 
         /// Three-way NaN-safe minimum (GLM `fmin(x, y, z)`).
-        pub inline fn fmin3(self: Self, b: anytype, c: anytype) Self {
-            return self.apply3(b, c, scalar.fmin3);
+        pub inline fn fmin3(self: Self, rhs: anytype, rhs2: anytype) Self {
+            return self.apply3(rhs, rhs2, scalar.fmin3);
         }
 
         /// Four-way NaN-safe minimum (GLM `fmin(x, y, z, w)`).
-        pub inline fn fmin4(self: Self, b: anytype, c: anytype, d: anytype) Self {
-            return self.fmin3(b, c).fmin(d);
+        pub inline fn fmin4(self: Self, rhs: anytype, rhs2: anytype, rhs3: anytype) Self {
+            return self.fmin3(rhs, rhs2).fmin(rhs3);
         }
 
         /// Component-wise NaN-safe maximum (GLM `fmax`): NaN operands are
@@ -956,20 +956,20 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         }
 
         /// Three-way NaN-safe maximum (GLM `fmax(x, y, z)`).
-        pub inline fn fmax3(self: Self, b: anytype, c: anytype) Self {
-            return self.apply3(b, c, scalar.fmax3);
+        pub inline fn fmax3(self: Self, rhs: anytype, rhs2: anytype) Self {
+            return self.apply3(rhs, rhs2, scalar.fmax3);
         }
 
         /// Four-way NaN-safe maximum (GLM `fmax(x, y, z, w)`).
-        pub inline fn fmax4(self: Self, b: anytype, c: anytype, d: anytype) Self {
-            return self.fmax3(b, c).fmax(d);
+        pub inline fn fmax4(self: Self, rhs: anytype, rhs2: anytype, rhs3: anytype) Self {
+            return self.fmax3(rhs, rhs2).fmax(rhs3);
         }
 
         /// Component-wise clamp that ignores NaN (GLM `fclamp(x, lo, hi)`):
         /// each lane is pinned into [lo, hi], but a NaN lane passes through
         /// untouched. Use on data feeds where NaN marks "missing".
-        pub inline fn fclamp(self: Self, lo: anytype, hi: anytype) Self {
-            return self.apply3(lo, hi, scalar.fclamp);
+        pub inline fn fclamp(self: Self, min_val: anytype, max_val: anytype) Self {
+            return self.apply3(min_val, max_val, scalar.fclamp);
         }
 
         /// Clamp every component into [0, 1] (GLM `clamp01`, 1.1 addition).
@@ -1022,23 +1022,23 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
 
         /// Three-way component-wise minimum (GLM `min(x, y, z)`); thriftier
         /// than chaining two `min` calls into temporaries.
-        pub inline fn min3(self: Self, b: Self, c: Self) Self {
-            return self.min(b).min(c);
+        pub inline fn min3(self: Self, rhs: Self, rhs2: Self) Self {
+            return self.min(rhs).min(rhs2);
         }
 
         /// Four-way component-wise minimum (GLM `min(x, y, z, w)`).
-        pub inline fn min4(self: Self, b: Self, c: Self, d: Self) Self {
-            return self.min(b).min(c).min(d);
+        pub inline fn min4(self: Self, rhs: Self, rhs2: Self, rhs3: Self) Self {
+            return self.min(rhs).min(rhs2).min(rhs3);
         }
 
         /// Three-way component-wise maximum (GLM `max(x, y, z)`).
-        pub inline fn max3(self: Self, b: Self, c: Self) Self {
-            return self.max(b).max(c);
+        pub inline fn max3(self: Self, rhs: Self, rhs2: Self) Self {
+            return self.max(rhs).max(rhs2);
         }
 
         /// Four-way component-wise maximum (GLM `max(x, y, z, w)`).
-        pub inline fn max4(self: Self, b: Self, c: Self, d: Self) Self {
-            return self.max(b).max(c).max(d);
+        pub inline fn max4(self: Self, rhs: Self, rhs2: Self, rhs3: Self) Self {
+            return self.max(rhs).max(rhs2).max(rhs3);
         }
 
         // ---- ext/vector_reciprocal ----
@@ -1119,24 +1119,24 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// (GLM `equalEps(x, y, eps)`): lane true iff `|x − y| < eps`.
         /// `eps` may be a vector or scalar. Use instead of `==` on float
         /// data — integration results are rarely bit-exact.
-        pub fn equalEps(self: Self, rhs: anytype, eps: anytype) Vec(L, bool) {
-            const ET = @TypeOf(eps);
+        pub fn equalEps(self: Self, rhs: anytype, epsilon: anytype) Vec(L, bool) {
+            const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
             var r: @Vector(L, bool) = undefined;
             inline for (0..L) |i| {
-                r[i] = scalar.equalEps(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+                r[i] = scalar.equalEps(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
 
         /// Per-component negation of `equalEps` (GLM
         /// `notEqualEps(x, y, eps)`): lane true iff `|x − y| ≥ eps`.
-        pub fn notEqualEps(self: Self, rhs: anytype, eps: anytype) Vec(L, bool) {
-            const ET = @TypeOf(eps);
+        pub fn notEqualEps(self: Self, rhs: anytype, epsilon: anytype) Vec(L, bool) {
+            const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
             var r: @Vector(L, bool) = undefined;
             inline for (0..L) |i| {
-                r[i] = scalar.notEqualEps(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+                r[i] = scalar.notEqualEps(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
@@ -1146,24 +1146,24 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// behavior matches `equalEps` — an absolute comparison against
         /// `eps` with user-controlled magnitude (GLM defaults to 0.1 for
         /// floats).
-        pub fn epsilonEqual(self: Self, rhs: Self, eps: anytype) Vec(L, bool) {
-            const ET = @TypeOf(eps);
+        pub fn epsilonEqual(self: Self, rhs: Self, epsilon: anytype) Vec(L, bool) {
+            const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
             var r: @Vector(L, bool) = undefined;
             inline for (0..L) |i| {
-                r[i] = scalar.epsilonEqual(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+                r[i] = scalar.epsilonEqual(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
 
         /// Per-component `|x − y| ≥ eps` (GLM `epsilonNotEqual`); the
         /// negation of `epsilonEqual`.
-        pub fn epsilonNotEqual(self: Self, rhs: Self, eps: anytype) Vec(L, bool) {
-            const ET = @TypeOf(eps);
+        pub fn epsilonNotEqual(self: Self, rhs: Self, epsilon: anytype) Vec(L, bool) {
+            const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
             var r: @Vector(L, bool) = undefined;
             inline for (0..L) |i| {
-                r[i] = scalar.epsilonNotEqual(self.v[i], rhs.v[i], if (ev) eps.v[i] else eps);
+                r[i] = scalar.epsilonNotEqual(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
@@ -1420,9 +1420,9 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `count` consecutive set bits (GLM `findNSB`), or -1 when no such
         /// run fits. Use for slot allocators: with `count` = freelist size
         /// it finds the first spot that can host a run.
-        pub fn findNSB(self: Self, count: anytype) Vec(L, i32) {
+        pub fn findNSB(self: Self, significant_bit_count: anytype) Vec(L, i32) {
             var r: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.findNSB(self.v[i], count);
+            inline for (0..L) |i| r[i] = scalar.findNSB(self.v[i], significant_bit_count);
             return .{ .v = r };
         }
 

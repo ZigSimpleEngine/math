@@ -3,7 +3,7 @@
 //! Column-major storage: `data[c]` is column c, `data[c][r]` is the element
 //! at (column c, row r), mirroring GLM's `m[c][r]` indexing and GLSL's
 //! column-major layout. Consequently `mul` treats the receiver as the
-//! LEFT operand: `m.mulVec(v)` computes `m * v`, and `a.mul(b)` computes
+//! LEFT operand: `matrix.mulVec(v)` computes `matrix * v`, and `a.mul(b)` computes
 //! `a * b` — the order matters, matrix products do not commute.
 //!
 //! Affine 4x4 helpers (`translate`/`scale`/`rotate`) mutate the receiver
@@ -43,7 +43,7 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         // ---- constructors ----
 
         /// Matrix of all zeroes (GLM `mat(C, R, 0)`). The additive identity
-        /// and the result of `m.sub(m)`; a projection built from scratch
+        /// and the result of `matrix.sub(m)`; a projection built from scratch
         /// usually starts here before its few non-zero elements are placed.
         pub fn zero() Self {
             return .{ .data = [_]Vec(R, T){Vec(R, T).zero()} ** C };
@@ -61,8 +61,8 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// Matrix with every element equal to `v` (GLM 1.1 `mat(f)`
         /// elementwise variant). Useful to build per-element factors, e.g.
         /// GLM's matrix `mix` uses `ones() - a`.
-        pub fn one(v: anytype) Self {
-            return .{ .data = [_]Vec(R, T){Vec(R, T).fill(scalar.cast(T, v))} ** C };
+        pub fn one(value: anytype) Self {
+            return .{ .data = [_]Vec(R, T){Vec(R, T).fill(scalar.cast(T, value))} ** C };
         }
 
         /// Matrix of all ones (GLM `mat(1)` fill style). Comes in handy as
@@ -73,10 +73,10 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         /// Diagonal matrix with value `v` on the diagonal (GLM `mat(v)` for
         /// a scalar v): `diag(1)` is `identity()`, `diag(2)` scales by 2.
-        pub fn diag(v: anytype) Self {
+        pub fn diag(value: anytype) Self {
             if (comptime C != R) @compileError("diag requires a square matrix");
             var res = zero();
-            inline for (0..C) |i| res.data[i].v[i] = scalar.cast(T, v);
+            inline for (0..C) |i| res.data[i].v[i] = scalar.cast(T, value);
             return res;
         }
 
@@ -109,13 +109,13 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// Read element at (column `c`, row `r`), 0-based, runtime indices.
         /// Prefer `col(i).v[r]` directly for hot paths — it compiles to a
         /// lane load without the extra call.
-        pub inline fn get(self: Self, c: usize, r: usize) T {
-            return self.data[c].v[r];
+        pub inline fn get(self: Self, col_index: usize, row_index: usize) T {
+            return self.data[col_index].v[row_index];
         }
 
         /// Write element at (column `c`, row `r`) of a mutable matrix.
-        pub inline fn set(self: *Self, c: usize, r: usize, v: T) void {
-            self.data[c].v[r] = v;
+        pub inline fn set(self: *Self, col_index: usize, row_index: usize, value: T) void {
+            self.data[col_index].v[row_index] = value;
         }
 
         /// Column c as a vector (GLM `column(m, c)`); indexes 0-based.
@@ -138,34 +138,34 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// linear-algebra operation — added matrices must share the same
         /// shape, and the result is per-element sums (rarely meaningful
         /// for transforms; useful for blending/interpolating weights).
-        pub fn add(self: Self, m: Self) Self {
+        pub fn add(self: Self, rhs: Self) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].add(m.data[c]);
+            inline for (0..C) |c| res.data[c] = self.data[c].add(rhs.data[c]);
             return res;
         }
 
         /// Element-wise subtraction (GLM `mat - mat`); inverse of `add`.
-        pub fn sub(self: Self, m: Self) Self {
+        pub fn sub(self: Self, rhs: Self) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].sub(m.data[c]);
+            inline for (0..C) |c| res.data[c] = self.data[c].sub(rhs.data[c]);
             return res;
         }
 
         /// Scalar multiplication: every element × `s` (GLM `mat * scalar`).
         /// Use to scale a matrix's effect (e.g. dampen a correction step)
         /// or with `1/det` when inverting.
-        pub fn mulScalar(self: Self, s: anytype) Self {
+        pub fn mulScalar(self: Self, scalar_value: anytype) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].mul(s);
+            inline for (0..C) |c| res.data[c] = self.data[c].mul(scalar_value);
             return res;
         }
 
         /// Component-wise (Hadamard) product (GLM `matrixCompMult`):
         /// `res[c][r] = a[c][r] * b[c][r]`. Distinct from real matrix
         /// multiplication `mul`; GLM uses it internally for its `mix`.
-        pub fn matrixCompMult(self: Self, m: Self) Self {
+        pub fn matrixCompMult(self: Self, rhs: Self) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].mul(m.data[c]);
+            inline for (0..C) |c| res.data[c] = self.data[c].mul(rhs.data[c]);
             return res;
         }
 
@@ -175,10 +175,10 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// `mat<C,R>*mat<C2,C>` shape rule). Use for composing transforms
         /// as `model.mul(view)` (view applies first). Order matters:
         /// `a.mul(b)` is NOT `b.mul(a)`.
-        pub fn mul(self: Self, m: anytype) Mat(@TypeOf(m).cols, R, T) {
-            const MC = @TypeOf(m).cols;
+        pub fn mul(self: Self, rhs: anytype) Mat(@TypeOf(rhs).cols, R, T) {
+            const MC = @TypeOf(rhs).cols;
             var res: Mat(MC, R, T) = undefined;
-            inline for (0..MC) |j| res.data[j] = self.mulVec(m.col(j));
+            inline for (0..MC) |j| res.data[j] = self.mulVec(rhs.col(j));
             return res;
         }
 
@@ -186,12 +186,12 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// linear combination of `self`'s columns, which is why column-major
         /// storage exists. This is the "transform a point/direction" call:
         /// `viewProj.mulVec(pos4)`.
-        pub fn mulVec(self: Self, v: Vec(C, T)) Vec(R, T) {
+        pub fn mulVec(self: Self, vector: Vec(C, T)) Vec(R, T) {
             var res: Vec(R, T) = undefined;
             inline for (0..R) |r| {
                 var acc: T = undefined;
                 inline for (0..C) |c| {
-                    const term = self.data[c].v[r] * v.v[c];
+                    const term = self.data[c].v[r] * vector.v[c];
                     acc = if (c == 0) term else acc + term;
                 }
                 res.v[r] = acc;
@@ -200,7 +200,7 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         }
 
         /// Transpose (GLM `transpose`): swaps rows and columns, producing
-        /// an R×C matrix. `m.transpose().transpose() == m`; used when
+        /// an R×C matrix. `matrix.transpose().transpose() == m`; used when
         /// converting between column- and row-major conventions and when
         /// inverting rotation matrices (the inverse of an orthogonal matrix
         /// is its transpose).
@@ -255,8 +255,7 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         pub fn inverse(self: Self) Self {
             if (comptime C != R) @compileError("inverse requires a square matrix");
             if (comptime R == 2) {
-                const OneOverDeterminant = @as(T, 1) / (
-                    self.data[0].v[0] * self.data[1].v[1] - self.data[1].v[0] * self.data[0].v[1]);
+                const OneOverDeterminant = @as(T, 1) / (self.data[0].v[0] * self.data[1].v[1] - self.data[1].v[0] * self.data[0].v[1]);
                 return init(.{
                     Vec(2, T).init(.{ self.data[1].v[1] * OneOverDeterminant, -self.data[0].v[1] * OneOverDeterminant }),
                     Vec(2, T).init(.{ -self.data[1].v[0] * OneOverDeterminant, self.data[0].v[0] * OneOverDeterminant }),
@@ -339,14 +338,14 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// Append a translation by `v` (GLM `translate(m, v)`): rebuilds
         /// column 3 as a linear combination of the existing columns, which
         /// makes the translation live in the LOCAL frame of `self`. Compose
-        /// left-to-right: `m.identity().translate(t).rotate(θ, axis)` puts
+        /// left-to-right: `matrix.identity().translate(t).rotate(θ, axis)` puts
         /// the rotation around the translated origin.
-        pub fn translate(self: Self, v: Vec(3, T)) Self {
+        pub fn translate(self: Self, translation: Vec(3, T)) Self {
             if (comptime C != 4 or R != 4) @compileError("translate requires a 4x4 matrix");
             var res = self;
-            res.data[3] = self.data[0].mul(v.v[0])
-                .add(self.data[1].mul(v.v[1]))
-                .add(self.data[2].mul(v.v[2]))
+            res.data[3] = self.data[0].mul(translation.v[0])
+                .add(self.data[1].mul(translation.v[1]))
+                .add(self.data[2].mul(translation.v[2]))
                 .add(self.data[3]);
             return res;
         }
@@ -355,12 +354,12 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// first three columns by the respective `v` components, keeping the
         /// translation column untouched, so the scale is applied in the
         /// local frame too. `scale(v)` with `v = (1,1,1)` is a no-op.
-        pub fn scale(self: Self, v: Vec(3, T)) Self {
+        pub fn scale(self: Self, scale_factors: Vec(3, T)) Self {
             if (comptime C != 4 or R != 4) @compileError("scale requires a 4x4 matrix");
             var res: Self = undefined;
-            res.data[0] = self.data[0].mul(v.v[0]);
-            res.data[1] = self.data[1].mul(v.v[1]);
-            res.data[2] = self.data[2].mul(v.v[2]);
+            res.data[0] = self.data[0].mul(scale_factors.v[0]);
+            res.data[1] = self.data[1].mul(scale_factors.v[1]);
+            res.data[2] = self.data[2].mul(scale_factors.v[2]);
             res.data[3] = self.data[3];
             return res;
         }
@@ -375,18 +374,18 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             if (comptime C != 4 or R != 4) @compileError("rotate requires a 4x4 matrix");
             const c = scalar.cos(angle);
             const s = scalar.sin(angle);
-            const axis_norm = axis.normalize();
-            const temp = axis_norm.mul(@as(T, 1) - c);
+            const axis_normal = axis.normalize();
+            const temp = axis_normal.mul(@as(T, 1) - c);
             var rot = Self.zero();
-            rot.data[0].v[0] = c + temp.v[0] * axis_norm.v[0];
-            rot.data[0].v[1] = temp.v[0] * axis_norm.v[1] + s * axis_norm.v[2];
-            rot.data[0].v[2] = temp.v[0] * axis_norm.v[2] - s * axis_norm.v[1];
-            rot.data[1].v[0] = temp.v[1] * axis_norm.v[0] - s * axis_norm.v[2];
-            rot.data[1].v[1] = c + temp.v[1] * axis_norm.v[1];
-            rot.data[1].v[2] = temp.v[1] * axis_norm.v[2] + s * axis_norm.v[0];
-            rot.data[2].v[0] = temp.v[2] * axis_norm.v[0] + s * axis_norm.v[1];
-            rot.data[2].v[1] = temp.v[2] * axis_norm.v[1] - s * axis_norm.v[0];
-            rot.data[2].v[2] = c + temp.v[2] * axis_norm.v[2];
+            rot.data[0].v[0] = c + temp.v[0] * axis_normal.v[0];
+            rot.data[0].v[1] = temp.v[0] * axis_normal.v[1] + s * axis_normal.v[2];
+            rot.data[0].v[2] = temp.v[0] * axis_normal.v[2] - s * axis_normal.v[1];
+            rot.data[1].v[0] = temp.v[1] * axis_normal.v[0] - s * axis_normal.v[2];
+            rot.data[1].v[1] = c + temp.v[1] * axis_normal.v[1];
+            rot.data[1].v[2] = temp.v[1] * axis_normal.v[2] + s * axis_normal.v[0];
+            rot.data[2].v[0] = temp.v[2] * axis_normal.v[0] + s * axis_normal.v[1];
+            rot.data[2].v[1] = temp.v[2] * axis_normal.v[1] - s * axis_normal.v[0];
+            rot.data[2].v[2] = c + temp.v[2] * axis_normal.v[2];
             var res: Self = undefined;
             res.data[0] = self.data[0].mul(rot.data[0].v[0])
                 .add(self.data[1].mul(rot.data[0].v[1]))
@@ -496,15 +495,15 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         ///   `x · (ones() − a) + y · a` — note the `1` is a full ones
         ///   matrix, NOT the identity, so off-diagonal elements blend too.
         /// Use the scalar form to fade between two keyframe transforms.
-        pub fn mix(self: Self, rhs: Self, a: anytype) Self {
-            const AT = @TypeOf(a);
+        pub fn mix(self: Self, rhs: Self, factor: anytype) Self {
+            const AT = @TypeOf(factor);
             if (comptime isMat(AT)) {
-                const ones_minus = ones().sub(a);
-                return self.matrixCompMult(ones_minus).add(rhs.matrixCompMult(a));
+                const ones_minus = ones().sub(factor);
+                return self.matrixCompMult(ones_minus).add(rhs.matrixCompMult(factor));
             }
-            const af: T = scalar.cast(T, a);
+            const factor_value: T = scalar.cast(T, factor);
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].mul(@as(T, 1) - af).add(rhs.data[c].mul(af));
+            inline for (0..C) |c| res.data[c] = self.data[c].mul(@as(T, 1) - factor_value).add(rhs.data[c].mul(factor_value));
             return res;
         }
 
@@ -516,8 +515,8 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// per-column tolerance `arg` — which may be a scalar or a vector
         /// whose component c holds column c's tolerance. `ulp` selects the
         /// ULP metric instead of the absolute epsilon.
-        fn colCmp(self: Self, rhs: Self, comptime need_all: bool, arg: anytype, comptime ulp: bool) Vec(C, bool) {
-            const AT = @TypeOf(arg);
+        fn colCmp(self: Self, rhs: Self, comptime need_all: bool, tolerance: anytype, comptime ulp: bool) Vec(C, bool) {
+            const AT = @TypeOf(tolerance);
             const av = comptime vec.isVec(AT);
             var res: @Vector(C, bool) = undefined;
             inline for (0..C) |c| {
@@ -525,18 +524,18 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
                 const b = rhs.data[c];
                 const bit = if (comptime need_all) blk: {
                     if (comptime ulp) {
-                        const e = a.equalULP(b, if (av) arg.v[c] else arg);
+                        const e = a.equalULP(b, if (av) tolerance.v[c] else tolerance);
                         break :blk e.all();
                     } else {
-                        const e = a.equalEps(b, if (av) arg.v[c] else arg);
+                        const e = a.equalEps(b, if (av) tolerance.v[c] else tolerance);
                         break :blk e.all();
                     }
                 } else blk: {
                     if (comptime ulp) {
-                        const e = a.notEqualULP(b, if (av) arg.v[c] else arg);
+                        const e = a.notEqualULP(b, if (av) tolerance.v[c] else tolerance);
                         break :blk e.any();
                     } else {
-                        const e = a.notEqualEps(b, if (av) arg.v[c] else arg);
+                        const e = a.notEqualEps(b, if (av) tolerance.v[c] else tolerance);
                         break :blk e.any();
                     }
                 };
@@ -569,15 +568,15 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// is true iff every element of column c differs by < `eps[c]`
         /// (eps vector) or < `eps` (scalar). The standard way to assert two
         /// transform matrices are "the same" after floating-point work.
-        pub fn equalEps(self: Self, rhs: Self, eps: anytype) Vec(C, bool) {
-            return self.colCmp(rhs, true, eps, false);
+        pub fn equalEps(self: Self, rhs: Self, epsilon: anytype) Vec(C, bool) {
+            return self.colCmp(rhs, true, epsilon, false);
         }
 
         /// Per-column tolerance inequality (GLM `notEqual(mat, mat, eps)`):
         /// column c is true iff some element of column c differs by at
         /// least the given tolerance.
-        pub fn notEqualEps(self: Self, rhs: Self, eps: anytype) Vec(C, bool) {
-            return self.colCmp(rhs, false, eps, false);
+        pub fn notEqualEps(self: Self, rhs: Self, epsilon: anytype) Vec(C, bool) {
+            return self.colCmp(rhs, false, epsilon, false);
         }
 
         /// Per-column ULP equality (GLM `equal(mat, mat, maxULPs)`): like
@@ -633,10 +632,10 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Left-handed twin of `lookAt` (GLM `lookAtLH`, NDC in [-1, 1]): the
-        /// side vector is `up×f` and the forward axis keeps its sign, so
-        /// the z-axis points INTO the scene — use for DirectX-style (or
-        /// flipped-z) camera conventions.
-        pub fn lookAtLH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
+/// side vector is `up×f` and the forward axis keeps its sign, so
+/// the z-axis points INTO the scene — use for DirectX-style (or
+/// flipped-z) camera conventions.
+pub fn lookAtLH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     const f = center.sub(eye).normalize();
     const s = up.cross(f).normalize();
     const u = f.cross(s);
@@ -657,11 +656,11 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Perspective projection (GLM `perspective`, default = right-handed,
-        /// NDC in [-1, 1]): maps a symmetric frustum with vertical field of
-        /// view `fovy` (radians) and `aspect = width/height` into clip
-        /// space, with the near plane at z = −zNear. This is the usual
-        /// OpenGL camera projection; Vulkan/Metal want the ZO variant.
-        pub fn perspective(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// NDC in [-1, 1]): maps a symmetric frustum with vertical field of
+/// view `fovy` (radians) and `aspect = width/height` into clip
+/// space, with the near plane at z = −zNear. This is the usual
+/// OpenGL camera projection; Vulkan/Metal want the ZO variant.
+pub fn perspective(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -673,11 +672,11 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Right-handed perspective with NDC z in [0, 1] (GLM
-        /// `perspectiveRH_ZO`): the depth output of Vulkan and Metal
-        /// (D3D-style) pipelines, so the depth buffer contains positive z
-        /// in [0, 1] with a reverse-friendly layout.
-        pub fn perspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-        const tan_half_fovy = scalar.tan(fovy / 2);
+/// `perspectiveRH_ZO`): the depth output of Vulkan and Metal
+/// (D3D-style) pipelines, so the depth buffer contains positive z
+/// in [0, 1] with a reverse-friendly layout.
+pub fn perspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
     res.data[1].v[1] = 1 / tan_half_fovy;
@@ -688,10 +687,10 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Left-handed perspective with NDC z in [0, 1] (GLM
-        /// `perspectiveLH_ZO`): z points into the scene, positive depth —
-        /// the combination used by many engines that flip z to get
-        /// right-handed rendering with a D3D-style depth range.
-        pub fn perspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveLH_ZO`): z points into the scene, positive depth —
+/// the combination used by many engines that flip z to get
+/// right-handed rendering with a D3D-style depth range.
+pub fn perspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -703,11 +702,11 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Orthographic projection (GLM `ortho`, default = right-handed, NDC
-        /// [-1, 1]): maps the axis-aligned box [left,right]×[bottom,top]×
-        /// [zNear,zFar] linearly into clip space without perspective
-        /// division — use for 3D UI, minimaps, and 2D overlays (with
-        /// `ortho2D` when no depth range matters).
-        pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// [-1, 1]): maps the axis-aligned box [left,right]×[bottom,top]×
+/// [zNear,zFar] linearly into clip space without perspective
+/// division — use for 3D UI, minimaps, and 2D overlays (with
+/// `ortho2D` when no depth range matters).
+pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -720,10 +719,10 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Right-handed ortho with NDC z in [0, 1] (GLM `orthoRH_ZO`): the
-        /// depth half-range is compressed to [0, 1] with the near plane at
-        /// z = 0 — pair with `perspectiveRH_ZO` for consistent depth
-        /// conventions in a D3D-style renderer.
-        pub fn orthoRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// depth half-range is compressed to [0, 1] with the near plane at
+/// z = 0 — pair with `perspectiveRH_ZO` for consistent depth
+/// conventions in a D3D-style renderer.
+pub fn orthoRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -736,11 +735,11 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Frustum projection (GLM `frustum`, default = right-handed, NDC
-        /// [-1, 1]): the general asymmetric perspective, defined by an
-        /// arbitrary near clipping rectangle instead of a symmetric fov.
-        /// Concave/degenerate boxes (left ≥ right etc.) produce singular
-        /// matrices; `perspective` is the common specialization.
-        pub fn frustum(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// [-1, 1]): the general asymmetric perspective, defined by an
+/// arbitrary near clipping rectangle instead of a symmetric fov.
+/// Concave/degenerate boxes (left ≥ right etc.) produce singular
+/// matrices; `perspective` is the common specialization.
+pub fn frustum(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -753,25 +752,25 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Explicit right-handed view (GLM `lookAtRH`): GLM's default clip
-        /// control is RH + NDC [-1, 1], so this is numerically identical
-        /// to `lookAt` — kept for parity with GLM's API surface.
-        pub fn lookAtRH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
+/// control is RH + NDC [-1, 1], so this is numerically identical
+/// to `lookAt` — kept for parity with GLM's API surface.
+pub fn lookAtRH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     return lookAt(eye, center, up);
 }
 
 /// Right-handed perspective with NDC z in [-1, 1] (GLM
-        /// `perspectiveRH_NO`): GLM's default, therefore identical to
-        /// `perspective`; use OpenGL-style depth as usual.
-        pub fn perspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveRH_NO`): GLM's default, therefore identical to
+/// `perspective`; use OpenGL-style depth as usual.
+pub fn perspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspective(fovy, aspect, zNear, zFar);
 }
 
 /// Left-handed perspective with NDC z in [-1, 1] (GLM
-        /// `perspectiveLH_NO`): forward is +z (into the scene) while depth
-        /// keeps OpenGL's symmetric range — matches the flipped-z trick
-        /// engines use for better precision without going ZO.
-        pub fn perspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-        const tan_half_fovy = scalar.tan(fovy / 2);
+/// `perspectiveLH_NO`): forward is +z (into the scene) while depth
+/// keeps OpenGL's symmetric range — matches the flipped-z trick
+/// engines use for better precision without going ZO.
+pub fn perspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
     res.data[1].v[1] = 1 / tan_half_fovy;
@@ -782,37 +781,37 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Zoom-variant perspective (GLM `perspectiveZO`; default clip control
-        /// is RH so this equals `perspectiveRH_ZO`). Named for the NDC
-        /// [0, 1] depth range; use in Vulkan/Metal pipelines.
-        pub fn perspectiveZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// is RH so this equals `perspectiveRH_ZO`). Named for the NDC
+/// [0, 1] depth range; use in Vulkan/Metal pipelines.
+pub fn perspectiveZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveRH_ZO(fovy, aspect, zNear, zFar);
 }
 
 /// Negative-to-one NDC perspective (GLM `perspectiveNO`; equals
-        /// `perspective`, the OpenGL default). The "NO" = [-1, 1] depth
-        /// range convention that GLM's aliases default to.
-        pub fn perspectiveNO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspective`, the OpenGL default). The "NO" = [-1, 1] depth
+/// range convention that GLM's aliases default to.
+pub fn perspectiveNO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspective(fovy, aspect, zNear, zFar);
 }
 
 /// Left-handed perspective alias (GLM `perspectiveLH`; GLM's default
-        /// LH clip control is NO, so this equals `perspectiveLH_NO`).
-        pub fn perspectiveLH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// LH clip control is NO, so this equals `perspectiveLH_NO`).
+pub fn perspectiveLH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveLH_NO(fovy, aspect, zNear, zFar);
 }
 
 /// Right-handed perspective alias (GLM `perspectiveRH`; GLM's default
-        /// RH clip control is NO, so this equals `perspective`).
-        pub fn perspectiveRH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+/// RH clip control is NO, so this equals `perspective`).
+pub fn perspectiveRH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return perspective(fovy, aspect, zNear, zFar);
 }
 
 /// Right-handed fov-from-size perspective with NDC z in [0, 1] (GLM
-        /// `perspectiveFovRH_ZO`): `fov` is the total vertical field of
-        /// view in radians, and the frustum is derived from a pixel
-        /// `width` × `height` instead of an aspect ratio — use for
-        /// render-to-texture cameras that must match a specific viewport.
-        pub fn perspectiveFovRH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveFovRH_ZO`): `fov` is the total vertical field of
+/// view in radians, and the frustum is derived from a pixel
+/// `width` × `height` instead of an aspect ratio — use for
+/// render-to-texture cameras that must match a specific viewport.
+pub fn perspectiveFovRH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -825,9 +824,9 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Right-handed fov-from-size perspective with NDC z in [-1, 1] (GLM
-        /// `perspectiveFovRH_NO`): like `perspectiveFovRH_ZO` but with
-        /// OpenGL's symmetric depth range.
-        pub fn perspectiveFovRH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveFovRH_NO`): like `perspectiveFovRH_ZO` but with
+/// OpenGL's symmetric depth range.
+pub fn perspectiveFovRH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -840,9 +839,9 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Left-handed fov-from-size perspective with NDC z in [0, 1] (GLM
-        /// `perspectiveFovLH_ZO`): LH counterpart of `perspectiveFovRH_ZO`
-        /// with positive depth — matches D3D12/Metal depth ranges.
-        pub fn perspectiveFovLH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveFovLH_ZO`): LH counterpart of `perspectiveFovRH_ZO`
+/// with positive depth — matches D3D12/Metal depth ranges.
+pub fn perspectiveFovLH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -855,8 +854,8 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Left-handed fov-from-size perspective with NDC z in [-1, 1] (GLM
-        /// `perspectiveFovLH_NO`): LH twin of `perspectiveFovRH_NO`.
-        pub fn perspectiveFovLH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveFovLH_NO`): LH twin of `perspectiveFovRH_NO`.
+pub fn perspectiveFovLH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -869,41 +868,41 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Fov-from-size perspective default (GLM `perspectiveFov`; RH + NDC
-        /// [-1, 1], so identical to `perspectiveFovRH_NO`).
-        pub fn perspectiveFov(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// [-1, 1], so identical to `perspectiveFovRH_NO`).
+pub fn perspectiveFov(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, zoom depth range (GLM `perspectiveFovZO`;
-        /// equals `perspectiveFovRH_ZO` under GLM's default RH control).
-        pub fn perspectiveFovZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// equals `perspectiveFovRH_ZO` under GLM's default RH control).
+pub fn perspectiveFovZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_ZO(fov, width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, negative-to-one depth (GLM
-        /// `perspectiveFovNO`; equals `perspectiveFovRH_NO`).
-        pub fn perspectiveFovNO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveFovNO`; equals `perspectiveFovRH_NO`).
+pub fn perspectiveFovNO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, left-handed (GLM `perspectiveFovLH`;
-        /// GLM's LH default is NO, so this equals `perspectiveFovLH_NO`).
-        pub fn perspectiveFovLH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// GLM's LH default is NO, so this equals `perspectiveFovLH_NO`).
+pub fn perspectiveFovLH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovLH_NO(fov, width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, right-handed (GLM `perspectiveFovRH`;
-        /// equals `perspectiveFovRH_NO` under GLM's RH default).
-        pub fn perspectiveFovRH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// equals `perspectiveFovRH_NO` under GLM's RH default).
+pub fn perspectiveFovRH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
 }
 
 /// Infinite-far-plane perspective, right-handed, NDC [-1, 1] (GLM
-        /// `infinitePerspectiveRH_NO`): zFar is dropped, the depth
-        /// function maps zNear to the far end of the range and everything
-        /// beyond it — good for starfields, large outdoor scenes and
-        /// reverse-z setups that must never clip at a finite distance.
-        pub fn infinitePerspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// `infinitePerspectiveRH_NO`): zFar is dropped, the depth
+/// function maps zNear to the far end of the range and everything
+/// beyond it — good for starfields, large outdoor scenes and
+/// reverse-z setups that must never clip at a finite distance.
+pub fn infinitePerspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -919,10 +918,10 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Infinite-far-plane perspective, right-handed, NDC [0, 1] (GLM
-        /// `infinitePerspectiveRH_ZO`): like the NO variant but with
-        /// Vulkan/Metal depth conventions; note the depth at zNear is 0,
-        /// so a reverse-z depth buffer pairs naturally.
-        pub fn infinitePerspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// `infinitePerspectiveRH_ZO`): like the NO variant but with
+/// Vulkan/Metal depth conventions; note the depth at zNear is 0,
+/// so a reverse-z depth buffer pairs naturally.
+pub fn infinitePerspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -938,9 +937,9 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Infinite-far-plane perspective, left-handed, NDC [-1, 1] (GLM
-        /// `infinitePerspectiveLH_NO`): LH twin of the RH_NO variant, for
-        /// +z-forward engines that need unlimited draw distance.
-        pub fn infinitePerspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// `infinitePerspectiveLH_NO`): LH twin of the RH_NO variant, for
+/// +z-forward engines that need unlimited draw distance.
+pub fn infinitePerspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -956,9 +955,9 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Infinite-far-plane perspective, left-handed, NDC [0, 1] (GLM
-        /// `infinitePerspectiveLH_ZO`): LH + ZO combination, e.g. for
-        /// D3D12-style pipelines with unlimited far distance.
-        pub fn infinitePerspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// `infinitePerspectiveLH_ZO`): LH + ZO combination, e.g. for
+/// D3D12-style pipelines with unlimited far distance.
+pub fn infinitePerspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -974,17 +973,17 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Infinite perspective default (GLM `infinitePerspective`; RH + NDC
-        /// [-1, 1], identical to `infinitePerspectiveRH_NO`).
-        pub fn infinitePerspective(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// [-1, 1], identical to `infinitePerspectiveRH_NO`).
+pub fn infinitePerspective(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return infinitePerspectiveRH_NO(fovy, aspect, zNear);
 }
 
 /// Infinite perspective with Lengyel's tweak (GLM
-        /// `tweakedInfinitePerspective(fovy, aspect, zNear, ep)`): the
-        /// `ep` parameter (usually machine epsilon) replaces the far
-        /// plane, removing the depth compression singularity that plain
-        /// infinite projections suffer at z → zNear.
-        pub fn tweakedInfinitePerspective(fovy: f32, aspect: f32, zNear: f32, ep: f32) mat4 {
+/// `tweakedInfinitePerspective(fovy, aspect, zNear, ep)`): the
+/// `ep` parameter (usually machine epsilon) replaces the far
+/// plane, removing the depth compression singularity that plain
+/// infinite projections suffer at z → zNear.
+pub fn tweakedInfinitePerspective(fovy: f32, aspect: f32, zNear: f32, epsilon: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -993,24 +992,24 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
-    res.data[2].v[2] = ep - 1;
+    res.data[2].v[2] = epsilon - 1;
     res.data[2].v[3] = -1;
-    res.data[3].v[2] = (ep - 2) * zNear;
+    res.data[3].v[2] = (epsilon - 2) * zNear;
     return res;
 }
 
 /// `tweakedInfinitePerspective` with `ep = f32 epsilon` (GLM
-        /// `tweakedInfinitePerspectiveDefault`): the recommended instant;
-        /// just pass fov/aspect/zNear.
-        pub fn tweakedInfinitePerspectiveDefault(fovy: f32, aspect: f32, zNear: f32) mat4 {
+/// `tweakedInfinitePerspectiveDefault`): the recommended instant;
+/// just pass fov/aspect/zNear.
+pub fn tweakedInfinitePerspectiveDefault(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return tweakedInfinitePerspective(fovy, aspect, zNear, std.math.floatEps(f32));
 }
 
 /// 2D orthographic projection (GLM `ortho(left, right, bottom, top)`):
-        /// the z axis is left alone (depth -1..1 as identity) — the
-        /// standard matrix for flat 2D rendering, UI overlays and screen
-        /// space coordinates in pixels.
-        pub fn ortho2D(left: f32, right: f32, bottom: f32, top: f32) mat4 {
+/// the z axis is left alone (depth -1..1 as identity) — the
+/// standard matrix for flat 2D rendering, UI overlays and screen
+/// space coordinates in pixels.
+pub fn ortho2D(left: f32, right: f32, bottom: f32, top: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -1021,9 +1020,9 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Left-handed ortho with NDC z in [0, 1] (GLM `orthoLH_ZO`): depth
-        /// maps zNear → 0, zFar → 1 with +z forward — the D3D12-style
-        /// ortho to pair with `perspectiveLH_ZO`.
-        pub fn orthoLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// maps zNear → 0, zFar → 1 with +z forward — the D3D12-style
+/// ortho to pair with `perspectiveLH_ZO`.
+pub fn orthoLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -1035,8 +1034,8 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Left-handed ortho with NDC z in [-1, 1] (GLM `orthoLH_NO`): +z
-        /// forward with OpenGL's symmetric depth range.
-        pub fn orthoLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// forward with OpenGL's symmetric depth range.
+pub fn orthoLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -1048,8 +1047,8 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Right-handed ortho with NDC z in [-1, 1] (GLM `orthoRH_NO`): the
-        /// OpenGL-style default, identical math to `ortho` itself.
-        pub fn orthoRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// OpenGL-style default, identical math to `ortho` itself.
+pub fn orthoRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
     res.data[1].v[1] = 2 / (top - bottom);
@@ -1061,33 +1060,33 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Zoom-depth ortho (GLM `orthoZO`; equals `orthoRH_ZO` under GLM's RH
-        /// default). Alias for parity with the ZO/NO naming.
-        pub fn orthoZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// default). Alias for parity with the ZO/NO naming.
+pub fn orthoZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoRH_ZO(left, right, bottom, top, zNear, zFar);
 }
 
 /// Negative-to-one-depth ortho (GLM `orthoNO`; equals `orthoRH_NO`,
-        /// the OpenGL default). Alias for parity with the ZO/NO naming.
-        pub fn orthoNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// the OpenGL default). Alias for parity with the ZO/NO naming.
+pub fn orthoNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
 /// Left-handed ortho alias (GLM `orthoLH`; GLM's LH default is NO, so
-        /// this equals `orthoLH_NO`).
-        pub fn orthoLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// this equals `orthoLH_NO`).
+pub fn orthoLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoLH_NO(left, right, bottom, top, zNear, zFar);
 }
 
 /// Right-handed ortho alias (GLM `orthoRH`; equals `orthoRH_NO`, the
-        /// OpenGL default).
-        pub fn orthoRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// OpenGL default).
+pub fn orthoRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return orthoRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
 /// Left-handed asymmetric frustum with NDC z in [0, 1] (GLM
-        /// `frustumLH_ZO`): +z forward, zNear → 0. Useful for asymmetric
-        /// near planes (e.g. off-axis projection) in D3D-style pipelines.
-        pub fn frustumLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// `frustumLH_ZO`): +z forward, zNear → 0. Useful for asymmetric
+/// near planes (e.g. off-axis projection) in D3D-style pipelines.
+pub fn frustumLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -1100,8 +1099,8 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Left-handed asymmetric frustum with NDC z in [-1, 1] (GLM
-        /// `frustumLH_NO`): +z forward with OpenGL's symmetric depth.
-        pub fn frustumLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// `frustumLH_NO`): +z forward with OpenGL's symmetric depth.
+pub fn frustumLH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -1114,9 +1113,9 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Right-handed asymmetric frustum with NDC z in [0, 1] (GLM
-        /// `frustumRH_ZO`): −z forward, zNear → 0 — Vulkan/Metal variant
-        /// for off-axis projections (CAVE/portal rendering).
-        pub fn frustumRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// `frustumRH_ZO`): −z forward, zNear → 0 — Vulkan/Metal variant
+/// for off-axis projections (CAVE/portal rendering).
+pub fn frustumRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -1129,9 +1128,9 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Right-handed asymmetric frustum with NDC z in [-1, 1] (GLM
-        /// `frustumRH_NO`): the OpenGL default, identical math to
-        /// `frustum`.
-        pub fn frustumRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// `frustumRH_NO`): the OpenGL default, identical math to
+/// `frustum`.
+pub fn frustumRH_NO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
     res.data[1].v[1] = (2 * zNear) / (top - bottom);
@@ -1144,38 +1143,38 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Zoom-depth frustum (GLM `frustumZO`; equals `frustumRH_ZO` under RH
-        /// default). Alias for ZO/NO parity.
-        pub fn frustumZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// default). Alias for ZO/NO parity.
+pub fn frustumZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumRH_ZO(left, right, bottom, top, zNear, zFar);
 }
 
 /// Negative-to-one-depth frustum (GLM `frustumNO`; equals
-        /// `frustumRH_NO`). Alias for ZO/NO parity.
-        pub fn frustumNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// `frustumRH_NO`). Alias for ZO/NO parity.
+pub fn frustumNO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
 /// Left-handed frustum alias (GLM `frustumLH`; GLM's LH default is NO,
-        /// so this equals `frustumLH_NO`).
-        pub fn frustumLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// so this equals `frustumLH_NO`).
+pub fn frustumLH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumLH_NO(left, right, bottom, top, zNear, zFar);
 }
 
 /// Right-handed frustum alias (GLM `frustumRH`; equals
-        /// `frustumRH_NO`, the OpenGL default).
-        pub fn frustumRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
+/// `frustumRH_NO`, the OpenGL default).
+pub fn frustumRH(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     return frustumRH_NO(left, right, bottom, top, zNear, zFar);
 }
 
 // ---- GLM ext/matrix_projection ----
 
-        /// Project a world-space point to window space with NDC z in
-        /// [0, 1] (GLM `projectZO(obj, model, proj, viewport)`):
-        /// `obj` is transformed by `model * proj`, mapped through the
-        /// viewport rect (x, y, width, height) and returned as screen
-        /// coordinates with depth in [0, 1]. Note GLM/MathML: with ZO
-        /// projections the returned z is clip-relative, not viewport-raw.
-        pub fn projectZO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// Project a world-space point to window space with NDC z in
+/// [0, 1] (GLM `projectZO(obj, model, proj, viewport)`):
+/// `obj` is transformed by `model * proj`, mapped through the
+/// viewport rect (x, y, width, height) and returned as screen
+/// coordinates with depth in [0, 1]. Note GLM/MathML: with ZO
+/// projections the returned z is clip-relative, not viewport-raw.
+pub fn projectZO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     var tmp = proj.mulVec(model.mulVec(Vec(4, f32).init(.{ obj.v[0], obj.v[1], obj.v[2], 1 })));
     tmp = tmp.div(tmp.v[3]);
     tmp.v[0] = tmp.v[0] * 0.5 + 0.5;
@@ -1186,11 +1185,11 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Project a world-space point to window space with NDC z in [-1, 1]
-        /// (GLM `projectNO(obj, model, proj, viewport)`): the OpenGL
-        /// counterpart of `projectZO` — screen x/y (pixels) plus the raw
-        /// viewport-unmapped depth in NDC [-1, 1]. Feed the result of
-        /// `project`/`projectNO` into `unProjectNO` to round-trip.
-        pub fn projectNO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// (GLM `projectNO(obj, model, proj, viewport)`): the OpenGL
+/// counterpart of `projectZO` — screen x/y (pixels) plus the raw
+/// viewport-unmapped depth in NDC [-1, 1]. Feed the result of
+/// `project`/`projectNO` into `unProjectNO` to round-trip.
+pub fn projectNO(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     var tmp = proj.mulVec(model.mulVec(Vec(4, f32).init(.{ obj.v[0], obj.v[1], obj.v[2], 1 })));
     tmp = tmp.div(tmp.v[3]);
     tmp = tmp.mul(0.5).add(0.5);
@@ -1200,18 +1199,18 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Projection default (GLM `project`; GLM's default clip control is NO,
-        /// so this equals `projectNO`) — world point → screen pixels +
-        /// OpenGL-style depth.
-        pub fn project(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// so this equals `projectNO`) — world point → screen pixels +
+/// OpenGL-style depth.
+pub fn project(obj: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     return projectNO(obj, model, proj, viewport);
 }
 
 /// Unproject a window-space point to world space with NDC z in [0, 1]
-        /// (GLM `unProjectZO(win, model, proj, viewport)`): the inverse of
-        /// `projectZO` — invert the `proj * model` chain, undo the viewport
-        /// mapping and perspective division. Use for mouse picking in
-        /// Vulkan/Metal-style pipelines.
-        pub fn unProjectZO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// (GLM `unProjectZO(win, model, proj, viewport)`): the inverse of
+/// `projectZO` — invert the `proj * model` chain, undo the viewport
+/// mapping and perspective division. Use for mouse picking in
+/// Vulkan/Metal-style pipelines.
+pub fn unProjectZO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     const inv = proj.mul(model).inverse();
     var tmp: Vec(4, f32) = undefined;
     tmp.v[0] = win.v[0];
@@ -1228,10 +1227,10 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Unproject a window-space point to world space with NDC z in [-1, 1]
-        /// (GLM `unProjectNO(win, model, proj, viewport)`): the OpenGL
-        /// counterpart of `unProjectZO` — use for mouse picking with
-        /// OpenGL-style depth buffers.
-        pub fn unProjectNO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// (GLM `unProjectNO(win, model, proj, viewport)`): the OpenGL
+/// counterpart of `unProjectZO` — use for mouse picking with
+/// OpenGL-style depth buffers.
+pub fn unProjectNO(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     const inv = proj.mul(model).inverse();
     var tmp: Vec(4, f32) = undefined;
     tmp.v[0] = win.v[0];
@@ -1247,18 +1246,18 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Unprojection default (GLM `unProject`; equals `unProjectNO` under
-        /// GLM's NO default).
-        pub fn unProject(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
+/// GLM's NO default).
+pub fn unProject(win: Vec(3, f32), model: mat4, proj: mat4, viewport: Vec(4, f32)) Vec(3, f32) {
     return unProjectNO(win, model, proj, viewport);
 }
 
 /// Build a picking matrix (GLM `pickMatrix(center, delta, viewport)`):
-        /// a translate+scale that isolates the `delta`×`delta` region
-        /// around `center` (both in window pixels) as the new frustum —
-        /// combine with rendering a second pass of the scene to implement
-        /// rubber-band selection. Returns identity if delta is not
-        /// positive.
-        pub fn pickMatrix(center: Vec(2, f32), delta: Vec(2, f32), viewport: Vec(4, f32)) mat4 {
+/// a translate+scale that isolates the `delta`×`delta` region
+/// around `center` (both in window pixels) as the new frustum —
+/// combine with rendering a second pass of the scene to implement
+/// rubber-band selection. Returns identity if delta is not
+/// positive.
+pub fn pickMatrix(center: Vec(2, f32), delta: Vec(2, f32), viewport: Vec(4, f32)) mat4 {
     var res = mat4.identity();
     if (!(delta.v[0] > 0 and delta.v[1] > 0)) return res;
     const temp = Vec(3, f32).init(.{
@@ -1272,17 +1271,17 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 
 // ---- GLM gtc/matrix_inverse ----
 
-        /// Inverse of a 3x3 affine (rotation+translation) matrix (GLM
-        /// `affineInverse`): the upper-left 2x2 is inverted in isolation
-        /// and the translation column of the result is placed in the third
-        /// column; the bottom row is implicitly [0, 0, 1]. Only valid when
-        /// the matrix really is affine — cheaper than a full `inverse`.
-        pub fn affineInverse3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
+/// Inverse of a 3x3 affine (rotation+translation) matrix (GLM
+/// `affineInverse`): the upper-left 2x2 is inverted in isolation
+/// and the translation column of the result is placed in the third
+/// column; the bottom row is implicitly [0, 0, 1]. Only valid when
+/// the matrix really is affine — cheaper than a full `inverse`.
+pub fn affineInverse3(matrix: Mat(3, 3, f32)) Mat(3, 3, f32) {
     const inv22 = Mat(2, 2, f32).init(.{
-        Vec(2, f32).init(.{ m.data[0].v[0], m.data[0].v[1] }),
-        Vec(2, f32).init(.{ m.data[1].v[0], m.data[1].v[1] }),
+        Vec(2, f32).init(.{ matrix.data[0].v[0], matrix.data[0].v[1] }),
+        Vec(2, f32).init(.{ matrix.data[1].v[0], matrix.data[1].v[1] }),
     }).inverse();
-    const t = Vec(2, f32).init(.{ m.data[2].v[0], m.data[2].v[1] });
+    const t = Vec(2, f32).init(.{ matrix.data[2].v[0], matrix.data[2].v[1] });
     const neg = inv22.mulVec(t).neg();
     return Mat(3, 3, f32).init(.{
         Vec(3, f32).init(.{ inv22.data[0].v[0], inv22.data[0].v[1], 0 }),
@@ -1292,17 +1291,17 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// Inverse of a 4x4 affine matrix (GLM `affineInverse`): inverts the
-        /// upper-left 3x3 and folds the translation in as `−R⁻¹·t`; bottom
-        /// row stays [0, 0, 0, 1]. The right tool for view/model matrices
-        /// (rigid body transforms) — an order of magnitude less work than
-        /// the full cofactor `inverse`.
-        pub fn affineInverse(m: mat4) mat4 {
+/// upper-left 3x3 and folds the translation in as `−R⁻¹·t`; bottom
+/// row stays [0, 0, 0, 1]. The right tool for view/model matrices
+/// (rigid body transforms) — an order of magnitude less work than
+/// the full cofactor `inverse`.
+pub fn affineInverse(matrix: mat4) mat4 {
     const inv33 = Mat(3, 3, f32).init(.{
-        Vec(3, f32).init(.{ m.data[0].v[0], m.data[0].v[1], m.data[0].v[2] }),
-        Vec(3, f32).init(.{ m.data[1].v[0], m.data[1].v[1], m.data[1].v[2] }),
-        Vec(3, f32).init(.{ m.data[2].v[0], m.data[2].v[1], m.data[2].v[2] }),
+        Vec(3, f32).init(.{ matrix.data[0].v[0], matrix.data[0].v[1], matrix.data[0].v[2] }),
+        Vec(3, f32).init(.{ matrix.data[1].v[0], matrix.data[1].v[1], matrix.data[1].v[2] }),
+        Vec(3, f32).init(.{ matrix.data[2].v[0], matrix.data[2].v[1], matrix.data[2].v[2] }),
     }).inverse();
-    const t = Vec(3, f32).init(.{ m.data[3].v[0], m.data[3].v[1], m.data[3].v[2] });
+    const t = Vec(3, f32).init(.{ matrix.data[3].v[0], matrix.data[3].v[1], matrix.data[3].v[2] });
     const neg = inv33.mulVec(t).neg();
     return mat4.init(.{
         Vec(4, f32).init(.{ inv33.data[0].v[0], inv33.data[0].v[1], inv33.data[0].v[2], 0 }),
@@ -1313,38 +1312,38 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// 2x2 inverse-transpose (GLM `inverseTranspose`, gtc/matrix_inverse):
-        /// NOTE — in GLM 1.1.0 this function returns the plain inverse for
-        /// 2x2 (the transpose step is missing upstream), and this port
-        /// deliberately reproduces GLM's output. For the mathematically
-        /// correct normal matrix of a 2D transform, transpose the result.
-        pub fn inverseTranspose2(m: Mat(2, 2, f32)) Mat(2, 2, f32) {
-    const d = m.determinant();
+/// NOTE — in GLM 1.1.0 this function returns the plain inverse for
+/// 2x2 (the transpose step is missing upstream), and this port
+/// deliberately reproduces GLM's output. For the mathematically
+/// correct normal matrix of a 2D transform, transpose the result.
+pub fn inverseTranspose2(matrix: Mat(2, 2, f32)) Mat(2, 2, f32) {
+    const d = matrix.determinant();
     return Mat(2, 2, f32).init(.{
-        Vec(2, f32).init(.{ m.data[1].v[1] / d, -m.data[0].v[1] / d }),
-        Vec(2, f32).init(.{ -m.data[1].v[0] / d, m.data[0].v[0] / d }),
+        Vec(2, f32).init(.{ matrix.data[1].v[1] / d, -matrix.data[0].v[1] / d }),
+        Vec(2, f32).init(.{ -matrix.data[1].v[0] / d, matrix.data[0].v[0] / d }),
     });
 }
 
 /// 3x3 inverse-transpose (GLM `inverseTranspose`, gtc/matrix_inverse):
-        /// `(M⁻¹)ᵀ`, computed directly as the transposed cofactor matrix
-        /// divided by the determinant. This is the "normal matrix" to
-        /// transform surface normals so they stay perpendicular after a
-        /// non-uniform scale.
-        pub fn inverseTranspose3(m: Mat(3, 3, f32)) Mat(3, 3, f32) {
+/// `(M⁻¹)ᵀ`, computed directly as the transposed cofactor matrix
+/// divided by the determinant. This is the "normal matrix" to
+/// transform surface normals so they stay perpendicular after a
+/// non-uniform scale.
+pub fn inverseTranspose3(matrix: Mat(3, 3, f32)) Mat(3, 3, f32) {
     const determinant =
-        m.data[0].v[0] * (m.data[1].v[1] * m.data[2].v[2] - m.data[1].v[2] * m.data[2].v[1]) -
-        m.data[0].v[1] * (m.data[1].v[0] * m.data[2].v[2] - m.data[1].v[2] * m.data[2].v[0]) +
-        m.data[0].v[2] * (m.data[1].v[0] * m.data[2].v[1] - m.data[1].v[1] * m.data[2].v[0]);
+        matrix.data[0].v[0] * (matrix.data[1].v[1] * matrix.data[2].v[2] - matrix.data[1].v[2] * matrix.data[2].v[1]) -
+        matrix.data[0].v[1] * (matrix.data[1].v[0] * matrix.data[2].v[2] - matrix.data[1].v[2] * matrix.data[2].v[0]) +
+        matrix.data[0].v[2] * (matrix.data[1].v[0] * matrix.data[2].v[1] - matrix.data[1].v[1] * matrix.data[2].v[0]);
     var inv: Mat(3, 3, f32) = undefined;
-    inv.data[0].v[0] = (m.data[1].v[1] * m.data[2].v[2] - m.data[2].v[1] * m.data[1].v[2]);
-    inv.data[0].v[1] = -(m.data[1].v[0] * m.data[2].v[2] - m.data[2].v[0] * m.data[1].v[2]);
-    inv.data[0].v[2] = (m.data[1].v[0] * m.data[2].v[1] - m.data[2].v[0] * m.data[1].v[1]);
-    inv.data[1].v[0] = -(m.data[0].v[1] * m.data[2].v[2] - m.data[2].v[1] * m.data[0].v[2]);
-    inv.data[1].v[1] = (m.data[0].v[0] * m.data[2].v[2] - m.data[2].v[0] * m.data[0].v[2]);
-    inv.data[1].v[2] = -(m.data[0].v[0] * m.data[2].v[1] - m.data[2].v[0] * m.data[0].v[1]);
-    inv.data[2].v[0] = (m.data[0].v[1] * m.data[1].v[2] - m.data[1].v[1] * m.data[0].v[2]);
-    inv.data[2].v[1] = -(m.data[0].v[0] * m.data[1].v[2] - m.data[1].v[0] * m.data[0].v[2]);
-    inv.data[2].v[2] = (m.data[0].v[0] * m.data[1].v[1] - m.data[1].v[0] * m.data[0].v[1]);
+    inv.data[0].v[0] = (matrix.data[1].v[1] * matrix.data[2].v[2] - matrix.data[2].v[1] * matrix.data[1].v[2]);
+    inv.data[0].v[1] = -(matrix.data[1].v[0] * matrix.data[2].v[2] - matrix.data[2].v[0] * matrix.data[1].v[2]);
+    inv.data[0].v[2] = (matrix.data[1].v[0] * matrix.data[2].v[1] - matrix.data[2].v[0] * matrix.data[1].v[1]);
+    inv.data[1].v[0] = -(matrix.data[0].v[1] * matrix.data[2].v[2] - matrix.data[2].v[1] * matrix.data[0].v[2]);
+    inv.data[1].v[1] = (matrix.data[0].v[0] * matrix.data[2].v[2] - matrix.data[2].v[0] * matrix.data[0].v[2]);
+    inv.data[1].v[2] = -(matrix.data[0].v[0] * matrix.data[2].v[1] - matrix.data[2].v[0] * matrix.data[0].v[1]);
+    inv.data[2].v[0] = (matrix.data[0].v[1] * matrix.data[1].v[2] - matrix.data[1].v[1] * matrix.data[0].v[2]);
+    inv.data[2].v[1] = -(matrix.data[0].v[0] * matrix.data[1].v[2] - matrix.data[1].v[0] * matrix.data[0].v[2]);
+    inv.data[2].v[2] = (matrix.data[0].v[0] * matrix.data[1].v[1] - matrix.data[1].v[0] * matrix.data[0].v[1]);
     var res = inv;
     inline for (0..3) |c| {
         inline for (0..3) |r| res.data[c].v[r] /= determinant;
@@ -1353,55 +1352,55 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 
 /// 4x4 inverse-transpose (GLM `inverseTranspose`, gtc/matrix_inverse):
-        /// `(M⁻¹)ᵀ` via the transposed cofactor expansion divided by the
-        /// determinant — the standard normal matrix for 3D rendering with
-        /// skewed or non-uniformly scaled models.
-        pub fn inverseTranspose(m: mat4) mat4 {
-    const sf00 = m.data[2].v[2] * m.data[3].v[3] - m.data[3].v[2] * m.data[2].v[3];
-    const sf01 = m.data[2].v[1] * m.data[3].v[3] - m.data[3].v[1] * m.data[2].v[3];
-    const sf02 = m.data[2].v[1] * m.data[3].v[2] - m.data[3].v[1] * m.data[2].v[2];
-    const sf03 = m.data[2].v[0] * m.data[3].v[3] - m.data[3].v[0] * m.data[2].v[3];
-    const sf04 = m.data[2].v[0] * m.data[3].v[2] - m.data[3].v[0] * m.data[2].v[2];
-    const sf05 = m.data[2].v[0] * m.data[3].v[1] - m.data[3].v[0] * m.data[2].v[1];
-    const sf06 = m.data[1].v[2] * m.data[3].v[3] - m.data[3].v[2] * m.data[1].v[3];
-    const sf07 = m.data[1].v[1] * m.data[3].v[3] - m.data[3].v[1] * m.data[1].v[3];
-    const sf08 = m.data[1].v[1] * m.data[3].v[2] - m.data[3].v[1] * m.data[1].v[2];
-    const sf09 = m.data[1].v[0] * m.data[3].v[3] - m.data[3].v[0] * m.data[1].v[3];
-    const sf10 = m.data[1].v[0] * m.data[3].v[2] - m.data[3].v[0] * m.data[1].v[2];
-    const sf11 = m.data[1].v[0] * m.data[3].v[1] - m.data[3].v[0] * m.data[1].v[1];
-    const sf12 = m.data[1].v[2] * m.data[2].v[3] - m.data[2].v[2] * m.data[1].v[3];
-    const sf13 = m.data[1].v[1] * m.data[2].v[3] - m.data[2].v[1] * m.data[1].v[3];
-    const sf14 = m.data[1].v[1] * m.data[2].v[2] - m.data[2].v[1] * m.data[1].v[2];
-    const sf15 = m.data[1].v[0] * m.data[2].v[3] - m.data[2].v[0] * m.data[1].v[3];
-    const sf16 = m.data[1].v[0] * m.data[2].v[2] - m.data[2].v[0] * m.data[1].v[2];
-    const sf17 = m.data[1].v[0] * m.data[2].v[1] - m.data[2].v[0] * m.data[1].v[1];
+/// `(M⁻¹)ᵀ` via the transposed cofactor expansion divided by the
+/// determinant — the standard normal matrix for 3D rendering with
+/// skewed or non-uniformly scaled models.
+pub fn inverseTranspose(matrix: mat4) mat4 {
+    const sf00 = matrix.data[2].v[2] * matrix.data[3].v[3] - matrix.data[3].v[2] * matrix.data[2].v[3];
+    const sf01 = matrix.data[2].v[1] * matrix.data[3].v[3] - matrix.data[3].v[1] * matrix.data[2].v[3];
+    const sf02 = matrix.data[2].v[1] * matrix.data[3].v[2] - matrix.data[3].v[1] * matrix.data[2].v[2];
+    const sf03 = matrix.data[2].v[0] * matrix.data[3].v[3] - matrix.data[3].v[0] * matrix.data[2].v[3];
+    const sf04 = matrix.data[2].v[0] * matrix.data[3].v[2] - matrix.data[3].v[0] * matrix.data[2].v[2];
+    const sf05 = matrix.data[2].v[0] * matrix.data[3].v[1] - matrix.data[3].v[0] * matrix.data[2].v[1];
+    const sf06 = matrix.data[1].v[2] * matrix.data[3].v[3] - matrix.data[3].v[2] * matrix.data[1].v[3];
+    const sf07 = matrix.data[1].v[1] * matrix.data[3].v[3] - matrix.data[3].v[1] * matrix.data[1].v[3];
+    const sf08 = matrix.data[1].v[1] * matrix.data[3].v[2] - matrix.data[3].v[1] * matrix.data[1].v[2];
+    const sf09 = matrix.data[1].v[0] * matrix.data[3].v[3] - matrix.data[3].v[0] * matrix.data[1].v[3];
+    const sf10 = matrix.data[1].v[0] * matrix.data[3].v[2] - matrix.data[3].v[0] * matrix.data[1].v[2];
+    const sf11 = matrix.data[1].v[0] * matrix.data[3].v[1] - matrix.data[3].v[0] * matrix.data[1].v[1];
+    const sf12 = matrix.data[1].v[2] * matrix.data[2].v[3] - matrix.data[2].v[2] * matrix.data[1].v[3];
+    const sf13 = matrix.data[1].v[1] * matrix.data[2].v[3] - matrix.data[2].v[1] * matrix.data[1].v[3];
+    const sf14 = matrix.data[1].v[1] * matrix.data[2].v[2] - matrix.data[2].v[1] * matrix.data[1].v[2];
+    const sf15 = matrix.data[1].v[0] * matrix.data[2].v[3] - matrix.data[2].v[0] * matrix.data[1].v[3];
+    const sf16 = matrix.data[1].v[0] * matrix.data[2].v[2] - matrix.data[2].v[0] * matrix.data[1].v[2];
+    const sf17 = matrix.data[1].v[0] * matrix.data[2].v[1] - matrix.data[2].v[0] * matrix.data[1].v[1];
 
     var inv: mat4 = undefined;
-    inv.data[0].v[0] = m.data[1].v[1] * sf00 - m.data[1].v[2] * sf01 + m.data[1].v[3] * sf02;
-    inv.data[0].v[1] = -(m.data[1].v[0] * sf00 - m.data[1].v[2] * sf03 + m.data[1].v[3] * sf04);
-    inv.data[0].v[2] = m.data[1].v[0] * sf01 - m.data[1].v[1] * sf03 + m.data[1].v[3] * sf05;
-    inv.data[0].v[3] = -(m.data[1].v[0] * sf02 - m.data[1].v[1] * sf04 + m.data[1].v[2] * sf05);
+    inv.data[0].v[0] = matrix.data[1].v[1] * sf00 - matrix.data[1].v[2] * sf01 + matrix.data[1].v[3] * sf02;
+    inv.data[0].v[1] = -(matrix.data[1].v[0] * sf00 - matrix.data[1].v[2] * sf03 + matrix.data[1].v[3] * sf04);
+    inv.data[0].v[2] = matrix.data[1].v[0] * sf01 - matrix.data[1].v[1] * sf03 + matrix.data[1].v[3] * sf05;
+    inv.data[0].v[3] = -(matrix.data[1].v[0] * sf02 - matrix.data[1].v[1] * sf04 + matrix.data[1].v[2] * sf05);
 
-    inv.data[1].v[0] = -(m.data[0].v[1] * sf00 - m.data[0].v[2] * sf01 + m.data[0].v[3] * sf02);
-    inv.data[1].v[1] = m.data[0].v[0] * sf00 - m.data[0].v[2] * sf03 + m.data[0].v[3] * sf04;
-    inv.data[1].v[2] = -(m.data[0].v[0] * sf01 - m.data[0].v[1] * sf03 + m.data[0].v[3] * sf05);
-    inv.data[1].v[3] = m.data[0].v[0] * sf02 - m.data[0].v[1] * sf04 + m.data[0].v[2] * sf05;
+    inv.data[1].v[0] = -(matrix.data[0].v[1] * sf00 - matrix.data[0].v[2] * sf01 + matrix.data[0].v[3] * sf02);
+    inv.data[1].v[1] = matrix.data[0].v[0] * sf00 - matrix.data[0].v[2] * sf03 + matrix.data[0].v[3] * sf04;
+    inv.data[1].v[2] = -(matrix.data[0].v[0] * sf01 - matrix.data[0].v[1] * sf03 + matrix.data[0].v[3] * sf05);
+    inv.data[1].v[3] = matrix.data[0].v[0] * sf02 - matrix.data[0].v[1] * sf04 + matrix.data[0].v[2] * sf05;
 
-    inv.data[2].v[0] = m.data[0].v[1] * sf06 - m.data[0].v[2] * sf07 + m.data[0].v[3] * sf08;
-    inv.data[2].v[1] = -(m.data[0].v[0] * sf06 - m.data[0].v[2] * sf09 + m.data[0].v[3] * sf10);
-    inv.data[2].v[2] = m.data[0].v[0] * sf07 - m.data[0].v[1] * sf09 + m.data[0].v[3] * sf11;
-    inv.data[2].v[3] = -(m.data[0].v[0] * sf08 - m.data[0].v[1] * sf10 + m.data[0].v[2] * sf11);
+    inv.data[2].v[0] = matrix.data[0].v[1] * sf06 - matrix.data[0].v[2] * sf07 + matrix.data[0].v[3] * sf08;
+    inv.data[2].v[1] = -(matrix.data[0].v[0] * sf06 - matrix.data[0].v[2] * sf09 + matrix.data[0].v[3] * sf10);
+    inv.data[2].v[2] = matrix.data[0].v[0] * sf07 - matrix.data[0].v[1] * sf09 + matrix.data[0].v[3] * sf11;
+    inv.data[2].v[3] = -(matrix.data[0].v[0] * sf08 - matrix.data[0].v[1] * sf10 + matrix.data[0].v[2] * sf11);
 
-    inv.data[3].v[0] = -(m.data[0].v[1] * sf12 - m.data[0].v[2] * sf13 + m.data[0].v[3] * sf14);
-    inv.data[3].v[1] = m.data[0].v[0] * sf12 - m.data[0].v[2] * sf15 + m.data[0].v[3] * sf16;
-    inv.data[3].v[2] = -(m.data[0].v[0] * sf13 - m.data[0].v[1] * sf15 + m.data[0].v[3] * sf17);
-    inv.data[3].v[3] = m.data[0].v[0] * sf14 - m.data[0].v[1] * sf16 + m.data[0].v[2] * sf17;
+    inv.data[3].v[0] = -(matrix.data[0].v[1] * sf12 - matrix.data[0].v[2] * sf13 + matrix.data[0].v[3] * sf14);
+    inv.data[3].v[1] = matrix.data[0].v[0] * sf12 - matrix.data[0].v[2] * sf15 + matrix.data[0].v[3] * sf16;
+    inv.data[3].v[2] = -(matrix.data[0].v[0] * sf13 - matrix.data[0].v[1] * sf15 + matrix.data[0].v[3] * sf17);
+    inv.data[3].v[3] = matrix.data[0].v[0] * sf14 - matrix.data[0].v[1] * sf16 + matrix.data[0].v[2] * sf17;
 
     const determinant =
-        m.data[0].v[0] * inv.data[0].v[0] +
-        m.data[0].v[1] * inv.data[0].v[1] +
-        m.data[0].v[2] * inv.data[0].v[2] +
-        m.data[0].v[3] * inv.data[0].v[3];
+        matrix.data[0].v[0] * inv.data[0].v[0] +
+        matrix.data[0].v[1] * inv.data[0].v[1] +
+        matrix.data[0].v[2] * inv.data[0].v[2] +
+        matrix.data[0].v[3] * inv.data[0].v[3];
 
     var res = inv;
     inline for (0..4) |c| {
@@ -1411,19 +1410,19 @@ pub fn lookAt(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 }
 // ---- GLM func_common `outerProduct` ----
 
-        /// Outer product (GLM/GLSL `outerProduct(c, r)`): column vector `c`
-        /// times row vector `r`, yielding the matrix `res[j][i] =
-        /// c[i]*r[j]` — shaped `Mat(r.len, c.len)`, i.e. `c.len` rows and
-        /// `r.len` columns. The dual of the dot product: builds a rank-1
-        /// matrix such as the projector `outerProduct(n, n)` or the dyad
-        /// `I − 2·outerProduct(n, n)` used in reflections.
-        pub fn outerProduct(c: anytype, r: anytype) Mat(@TypeOf(r).len, @TypeOf(c).len, @TypeOf(c).value_type) {
-    const T = @TypeOf(c).value_type;
-    const CL = @TypeOf(c).len;
-    const RL = @TypeOf(r).len;
+/// Outer product (GLM/GLSL `outerProduct(c, r)`): column vector `c`
+/// times row vector `r`, yielding the matrix `res[j][i] =
+/// c[i]*r[j]` — shaped `Mat(r.len, c.len)`, i.e. `c.len` rows and
+/// `r.len` columns. The dual of the dot product: builds a rank-1
+/// matrix such as the projector `outerProduct(n, n)` or the dyad
+/// `I − 2·outerProduct(n, n)` used in reflections.
+pub fn outerProduct(col_vec: anytype, row_vec: anytype) Mat(@TypeOf(row_vec).len, @TypeOf(col_vec).len, @TypeOf(col_vec).value_type) {
+    const T = @TypeOf(col_vec).value_type;
+    const CL = @TypeOf(col_vec).len;
+    const RL = @TypeOf(row_vec).len;
     var res: Mat(RL, CL, T) = undefined;
     inline for (0..RL) |i| {
-        inline for (0..CL) |j| res.data[i].v[j] = c.v[j] * r.v[i];
+        inline for (0..CL) |j| res.data[i].v[j] = col_vec.v[j] * row_vec.v[i];
     }
     return res;
 }

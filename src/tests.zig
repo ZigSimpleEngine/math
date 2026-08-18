@@ -21,19 +21,19 @@ const mat2 = Mat(2, 2, f32);
 const mat3 = Mat(3, 3, f32);
 const mat4 = Mat(4, 4, f32);
 
-fn expectMat4Approx(actual: anytype, expected: [16]f32, tol: f32) !void {
+fn expectMat4Approx(actual: anytype, expected: [16]f32, tolerance: f32) !void {
     inline for (0..4) |c| inline for (0..4) |r| {
-        try std.testing.expectApproxEqAbs(expected[c * 4 + r], @as(f32, @floatCast(actual.data[c].v[r])), tol);
+        try std.testing.expectApproxEqAbs(expected[c * 4 + r], @as(f32, @floatCast(actual.data[c].v[r])), tolerance);
     };
 }
 
-fn expectVecApprox(actual: anytype, expected: anytype, tol: f32) !void {
+fn expectVecApprox(actual: anytype, expected: anytype, tolerance: f32) !void {
     const A = @TypeOf(actual);
     inline for (0..A.len) |i| {
         try std.testing.expectApproxEqAbs(
             @as(f32, @floatCast(@as(@TypeOf(expected).value_type, expected.v[i]))),
             @as(f32, @floatCast(actual.v[i])),
-            tol,
+            tolerance,
         );
     }
 }
@@ -614,17 +614,17 @@ test "mat comp mult outer" {
     }, 1e-6);
 }
 
-fn expectQuatApprox(actual: anytype, expected: [4]f32, tol: f32) !void {
+fn expectQuatApprox(actual: anytype, expected: [4]f32, tolerance: f32) !void {
     const T = @TypeOf(actual).value_type;
     const w: f32 = @floatCast(actual.w);
     const x: f32 = @floatCast(actual.x);
     const y: f32 = @floatCast(actual.y);
     const z: f32 = @floatCast(actual.z);
     _ = T;
-    try std.testing.expectApproxEqAbs(expected[0], w, tol);
-    try std.testing.expectApproxEqAbs(expected[1], x, tol);
-    try std.testing.expectApproxEqAbs(expected[2], y, tol);
-    try std.testing.expectApproxEqAbs(expected[3], z, tol);
+    try std.testing.expectApproxEqAbs(expected[0], w, tolerance);
+    try std.testing.expectApproxEqAbs(expected[1], x, tolerance);
+    try std.testing.expectApproxEqAbs(expected[2], y, tolerance);
+    try std.testing.expectApproxEqAbs(expected[3], z, tolerance);
 }
 
 // ---- quaternions ----
