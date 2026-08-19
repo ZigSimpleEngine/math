@@ -1,4 +1,4 @@
-//! Matrix math — GLM-compatible `mat<C, R, T>` (C columns, R rows).
+//! Matrix math — GLM-compatible `mat<num_columns, num_rows, scalar_type>` (num_columns columns, num_rows rows).
 //!
 //! Column-major storage: `data[c]` is column c, `data[c][r]` is the element
 //! at (column c, row r), mirroring GLM's `m[c][r]` indexing and GLSL's
@@ -16,37 +16,37 @@ const scalar = @import("scalar.zig");
 const vec = @import("vec.zig");
 const Vec = vec.Vec;
 
-/// Returns `true` if `T` looks like a matrix produced by `Mat(C, R, T)`
+/// Returns `true` if `scalar_type` looks like a matrix produced by `Mat(num_columns, num_rows, scalar_type)`
 /// (it declares `cols`/`rows` and carries a `data` field). Use to dispatch
 /// between scalar/vector/matrix operands in generic code.
-pub fn isMat(comptime T: type) bool {
-    return @typeInfo(T) == .@"struct" and @hasDecl(T, "cols") and @hasDecl(T, "rows") and @hasField(T, "data");
+pub fn isMat(comptime candidate_type: type) bool {
+    return @typeInfo(candidate_type) == .@"struct" and @hasDecl(candidate_type, "cols") and @hasDecl(candidate_type, "rows") and @hasField(candidate_type, "data");
 }
 
-/// Create a matrix type with `C` columns and `R` rows of scalar `T`
+/// Create a matrix type with `num_columns` columns and `num_rows` rows of scalar `scalar_type`
 /// (float or int). The type name doubles as a namespace:
 /// `mat4.identity()`, `Mat(3, 3, f32).zero()`, and the type exposes
 /// `cols`/`rows`/`col_type`/`row_type` metadata for generic code.
-pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
+pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scalar_type: type) type {
     return struct {
         pub const Self = @This();
-        pub const cols: comptime_int = C;
-        pub const rows: comptime_int = R;
-        pub const col_count: comptime_int = C;
-        pub const row_count: comptime_int = R;
-        pub const value_type: type = T;
-        pub const col_type: type = Vec(R, T);
-        pub const row_type: type = Vec(C, T);
+        pub const cols: comptime_int = num_columns;
+        pub const rows: comptime_int = num_rows;
+        pub const col_count: comptime_int = num_columns;
+        pub const row_count: comptime_int = num_rows;
+        pub const value_type: type = scalar_type;
+        pub const col_type: type = Vec(num_rows, scalar_type);
+        pub const row_type: type = Vec(num_columns, scalar_type);
 
-        data: [C]Vec(R, T),
+        data: [num_columns]Vec(num_rows, scalar_type),
 
         // ---- constructors ----
 
-        /// Matrix of all zeroes (GLM `mat(C, R, 0)`). The additive identity
+        /// Matrix of all zeroes (GLM `mat(num_columns, num_rows, 0)`). The additive identity
         /// and the result of `matrix.sub(m)`; a projection built from scratch
         /// usually starts here before its few non-zero elements are placed.
         pub fn zero() Self {
-            return .{ .data = [_]Vec(R, T){Vec(R, T).zero()} ** C };
+            return .{ .data = [_]Vec(num_rows, scalar_type){Vec(num_rows, scalar_type).zero()} ** num_columns };
         }
 
         /// Square identity matrix (GLM `mat(v)` with v=1): ones on the
@@ -54,33 +54,33 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// use it as the starting point of `translate`/`scale`/`rotate`
         /// chains.
         pub fn identity() Self {
-            if (comptime C != R) @compileError("identity requires a square matrix");
-            return diag(@as(T, 1));
+            if (comptime num_columns != num_rows) @compileError("identity requires a square matrix");
+            return diag(@as(scalar_type, 1));
         }
 
         /// Matrix with every element equal to `v` (GLM 1.1 `mat(f)`
         /// elementwise variant). Useful to build per-element factors, e.g.
         /// GLM's matrix `mix` uses `ones() - a`.
         pub fn one(value: anytype) Self {
-            return .{ .data = [_]Vec(R, T){Vec(R, T).fill(scalar.cast(T, value))} ** C };
+            return .{ .data = [_]Vec(num_rows, scalar_type){Vec(num_rows, scalar_type).fill(scalar.cast(scalar_type, value))} ** num_columns };
         }
 
         /// Matrix of all ones (GLM `mat(1)` fill style). Comes in handy as
         /// the "1" in element-wise expressions like `ones() - a`.
         pub fn ones() Self {
-            return one(@as(T, 1));
+            return one(@as(scalar_type, 1));
         }
 
         /// Diagonal matrix with value `v` on the diagonal (GLM `mat(v)` for
         /// a scalar v): `diag(1)` is `identity()`, `diag(2)` scales by 2.
         pub fn diag(value: anytype) Self {
-            if (comptime C != R) @compileError("diag requires a square matrix");
+            if (comptime num_columns != num_rows) @compileError("diag requires a square matrix");
             var res = zero();
-            inline for (0..C) |i| res.data[i].v[i] = scalar.cast(T, value);
+            inline for (0..num_columns) |i| res.data[i].v[i] = scalar.cast(scalar_type, value);
             return res;
         }
 
-        /// Build a matrix from a tuple of columns, each a `Vec(R, T)`
+        /// Build a matrix from a tuple of columns, each a `Vec(num_rows, scalar_type)`
         /// (GLM's `mat(c0, c1, ...)` column constructor), or from a plain
         /// scalar which produces `diag(v)`. Use for literals:
         /// `mat4.init(.{ c0, c1, c2, c3 })` where `cN` are `vec4`s.
@@ -94,13 +94,13 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             inline for (fields) |f| {
                 const e = @field(args, f.name);
                 const ET = @TypeOf(e);
-                if (comptime !(ET == Vec(R, T)))
-                    @compileError("Mat init: expected column of type " ++ @typeName(Vec(R, T)));
-                if (comptime n >= C) @compileError("Mat init: too many columns");
+                if (comptime !(ET == Vec(num_rows, scalar_type)))
+                    @compileError("Mat init: expected column of type " ++ @typeName(Vec(num_rows, scalar_type)));
+                if (comptime n >= num_columns) @compileError("Mat init: too many columns");
                 res.data[n] = e;
                 n += 1;
             }
-            if (comptime n != C) @compileError("Mat init: expected " ++ comptimePrint("{d}", .{C}) ++ " columns");
+            if (comptime n != num_columns) @compileError("Mat init: expected " ++ comptimePrint("{d}", .{num_columns}) ++ " columns");
             return res;
         }
 
@@ -109,26 +109,26 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// Read element at (column `c`, row `r`), 0-based, runtime indices.
         /// Prefer `col(i).v[r]` directly for hot paths — it compiles to a
         /// lane load without the extra call.
-        pub inline fn get(self: Self, col_index: usize, row_index: usize) T {
+        pub inline fn get(self: Self, col_index: usize, row_index: usize) scalar_type {
             return self.data[col_index].v[row_index];
         }
 
         /// Write element at (column `c`, row `r`) of a mutable matrix.
-        pub inline fn set(self: *Self, col_index: usize, row_index: usize, value: T) void {
+        pub inline fn set(self: *Self, col_index: usize, row_index: usize, value: scalar_type) void {
             self.data[col_index].v[row_index] = value;
         }
 
         /// Column c as a vector (GLM `column(m, c)`); indexes 0-based.
         /// Reading a column is free — it is the native storage unit.
-        pub inline fn col(self: Self, i: usize) Vec(R, T) {
+        pub inline fn col(self: Self, i: usize) Vec(num_rows, scalar_type) {
             return self.data[i];
         }
 
         /// Row r as a vector (GLM `row(m, r)`), gathered across columns.
         /// Costlier than `col`; use for dot products with row-major data.
-        pub fn row(self: Self, i: usize) Vec(C, T) {
-            var res: Vec(C, T) = undefined;
-            inline for (0..C) |c| res.v[c] = self.data[c].v[i];
+        pub fn row(self: Self, i: usize) Vec(num_columns, scalar_type) {
+            var res: Vec(num_columns, scalar_type) = undefined;
+            inline for (0..num_columns) |c| res.v[c] = self.data[c].v[i];
             return res;
         }
 
@@ -138,16 +138,16 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// linear-algebra operation — added matrices must share the same
         /// shape, and the result is per-element sums (rarely meaningful
         /// for transforms; useful for blending/interpolating weights).
-        pub fn add(self: Self, rhs: Self) Self {
+        pub fn add(self: Self, right_hand_side: Self) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].add(rhs.data[c]);
+            inline for (0..num_columns) |c| res.data[c] = self.data[c].add(right_hand_side.data[c]);
             return res;
         }
 
         /// Element-wise subtraction (GLM `mat - mat`); inverse of `add`.
-        pub fn sub(self: Self, rhs: Self) Self {
+        pub fn sub(self: Self, right_hand_side: Self) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].sub(rhs.data[c]);
+            inline for (0..num_columns) |c| res.data[c] = self.data[c].sub(right_hand_side.data[c]);
             return res;
         }
 
@@ -156,29 +156,29 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// or with `1/det` when inverting.
         pub fn mulScalar(self: Self, scalar_value: anytype) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].mul(scalar_value);
+            inline for (0..num_columns) |c| res.data[c] = self.data[c].mul(scalar_value);
             return res;
         }
 
         /// Component-wise (Hadamard) product (GLM `matrixCompMult`):
         /// `res[c][r] = a[c][r] * b[c][r]`. Distinct from real matrix
         /// multiplication `mul`; GLM uses it internally for its `mix`.
-        pub fn matrixCompMult(self: Self, rhs: Self) Self {
+        pub fn matrixCompMult(self: Self, right_hand_side: Self) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].mul(rhs.data[c]);
+            inline for (0..num_columns) |c| res.data[c] = self.data[c].mul(right_hand_side.data[c]);
             return res;
         }
 
         /// Matrix product `self * m` (GLM `mat * mat`): column-major
         /// multiplication. The result has `m`'s column count and `self`'s
         /// row count (so `Mat(3,2).mul(Mat(4,3))` is a 4×2 matrix — GLM's
-        /// `mat<C,R>*mat<C2,C>` shape rule). Use for composing transforms
+        /// `mat<num_columns,num_rows>*mat<C2,num_columns>` shape rule). Use for composing transforms
         /// as `model.mul(view)` (view applies first). Order matters:
         /// `a.mul(b)` is NOT `b.mul(a)`.
-        pub fn mul(self: Self, rhs: anytype) Mat(@TypeOf(rhs).cols, R, T) {
-            const MC = @TypeOf(rhs).cols;
-            var res: Mat(MC, R, T) = undefined;
-            inline for (0..MC) |j| res.data[j] = self.mulVec(rhs.col(j));
+        pub fn mul(self: Self, right_hand_side: anytype) Mat(@TypeOf(right_hand_side).cols, num_rows, scalar_type) {
+            const right_hand_side_col_count = @TypeOf(right_hand_side).cols;
+            var res: Mat(right_hand_side_col_count, num_rows, scalar_type) = undefined;
+            inline for (0..right_hand_side_col_count) |j| res.data[j] = self.mulVec(right_hand_side.col(j));
             return res;
         }
 
@@ -186,11 +186,11 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// linear combination of `self`'s columns, which is why column-major
         /// storage exists. This is the "transform a point/direction" call:
         /// `viewProj.mulVec(pos4)`.
-        pub fn mulVec(self: Self, vector: Vec(C, T)) Vec(R, T) {
-            var res: Vec(R, T) = undefined;
-            inline for (0..R) |r| {
-                var acc: T = undefined;
-                inline for (0..C) |c| {
+        pub fn mulVec(self: Self, vector: Vec(num_columns, scalar_type)) Vec(num_rows, scalar_type) {
+            var res: Vec(num_rows, scalar_type) = undefined;
+            inline for (0..num_rows) |r| {
+                var acc: scalar_type = undefined;
+                inline for (0..num_columns) |c| {
                     const term = self.data[c].v[r] * vector.v[c];
                     acc = if (c == 0) term else acc + term;
                 }
@@ -200,14 +200,14 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         }
 
         /// Transpose (GLM `transpose`): swaps rows and columns, producing
-        /// an R×C matrix. `matrix.transpose().transpose() == m`; used when
+        /// an num_rows×num_columns matrix. `matrix.transpose().transpose() == m`; used when
         /// converting between column- and row-major conventions and when
         /// inverting rotation matrices (the inverse of an orthogonal matrix
         /// is its transpose).
-        pub fn transpose(self: Self) Mat(R, C, T) {
-            var res: Mat(R, C, T) = undefined;
-            inline for (0..R) |r| {
-                inline for (0..C) |c| res.data[r].v[c] = self.data[c].v[r];
+        pub fn transpose(self: Self) Mat(num_rows, num_columns, scalar_type) {
+            var res: Mat(num_rows, num_columns, scalar_type) = undefined;
+            inline for (0..num_rows) |r| {
+                inline for (0..num_columns) |c| res.data[r].v[c] = self.data[c].v[r];
             }
             return res;
         }
@@ -216,23 +216,23 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// volume scaling factor of the linear map. Zero (or near-zero)
         /// means the matrix is singular — `inverse` will divide by it, so
         /// test `det != 0` before inverting.
-        pub fn determinant(self: Self) T {
-            if (comptime C != R) @compileError("determinant requires a square matrix");
-            if (comptime R == 2) {
+        pub fn determinant(self: Self) scalar_type {
+            if (comptime num_columns != num_rows) @compileError("determinant requires a square matrix");
+            if (comptime num_rows == 2) {
                 return self.data[0].v[0] * self.data[1].v[1] - self.data[1].v[0] * self.data[0].v[1];
-            } else if (comptime R == 3) {
+            } else if (comptime num_rows == 3) {
                 const t1 = self.data[1].v[1] * self.data[2].v[2] - self.data[2].v[1] * self.data[1].v[2];
                 const t2 = self.data[0].v[1] * self.data[2].v[2] - self.data[2].v[1] * self.data[0].v[2];
                 const t3 = self.data[0].v[1] * self.data[1].v[2] - self.data[1].v[1] * self.data[0].v[2];
                 return self.data[0].v[0] * t1 - self.data[1].v[0] * t2 + self.data[2].v[0] * t3;
-            } else if (comptime R == 4) {
+            } else if (comptime num_rows == 4) {
                 const SubFactor00 = self.data[2].v[2] * self.data[3].v[3] - self.data[3].v[2] * self.data[2].v[3];
                 const SubFactor01 = self.data[2].v[1] * self.data[3].v[3] - self.data[3].v[1] * self.data[2].v[3];
                 const SubFactor02 = self.data[2].v[1] * self.data[3].v[2] - self.data[3].v[1] * self.data[2].v[2];
                 const SubFactor03 = self.data[2].v[0] * self.data[3].v[3] - self.data[3].v[0] * self.data[2].v[3];
                 const SubFactor04 = self.data[2].v[0] * self.data[3].v[2] - self.data[3].v[0] * self.data[2].v[2];
                 const SubFactor05 = self.data[2].v[0] * self.data[3].v[1] - self.data[3].v[0] * self.data[2].v[1];
-                const DetCof = Vec(4, T).init(.{
+                const DetCof = Vec(4, scalar_type).init(.{
                     (self.data[1].v[1] * SubFactor00 - self.data[1].v[2] * SubFactor01 + self.data[1].v[3] * SubFactor02),
                     -(self.data[1].v[0] * SubFactor00 - self.data[1].v[2] * SubFactor03 + self.data[1].v[3] * SubFactor04),
                     (self.data[1].v[0] * SubFactor01 - self.data[1].v[1] * SubFactor03 + self.data[1].v[3] * SubFactor05),
@@ -253,18 +253,18 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// (near-singular) matrix inverts to huge values. For rigid
         /// transforms prefer `affineInverse`, which skips most of the work.
         pub fn inverse(self: Self) Self {
-            if (comptime C != R) @compileError("inverse requires a square matrix");
-            if (comptime R == 2) {
-                const OneOverDeterminant = @as(T, 1) / (self.data[0].v[0] * self.data[1].v[1] - self.data[1].v[0] * self.data[0].v[1]);
+            if (comptime num_columns != num_rows) @compileError("inverse requires a square matrix");
+            if (comptime num_rows == 2) {
+                const OneOverDeterminant = @as(scalar_type, 1) / (self.data[0].v[0] * self.data[1].v[1] - self.data[1].v[0] * self.data[0].v[1]);
                 return init(.{
-                    Vec(2, T).init(.{ self.data[1].v[1] * OneOverDeterminant, -self.data[0].v[1] * OneOverDeterminant }),
-                    Vec(2, T).init(.{ -self.data[1].v[0] * OneOverDeterminant, self.data[0].v[0] * OneOverDeterminant }),
+                    Vec(2, scalar_type).init(.{ self.data[1].v[1] * OneOverDeterminant, -self.data[0].v[1] * OneOverDeterminant }),
+                    Vec(2, scalar_type).init(.{ -self.data[1].v[0] * OneOverDeterminant, self.data[0].v[0] * OneOverDeterminant }),
                 });
-            } else if (comptime R == 3) {
+            } else if (comptime num_rows == 3) {
                 const t1 = self.data[1].v[1] * self.data[2].v[2] - self.data[2].v[1] * self.data[1].v[2];
                 const t2 = self.data[0].v[1] * self.data[2].v[2] - self.data[2].v[1] * self.data[0].v[2];
                 const t3 = self.data[0].v[1] * self.data[1].v[2] - self.data[1].v[1] * self.data[0].v[2];
-                const OneOverDeterminant = @as(T, 1) / (self.data[0].v[0] * t1 - self.data[1].v[0] * t2 + self.data[2].v[0] * t3);
+                const OneOverDeterminant = @as(scalar_type, 1) / (self.data[0].v[0] * t1 - self.data[1].v[0] * t2 + self.data[2].v[0] * t3);
                 var res: Self = undefined;
                 res.data[0].v[0] = (self.data[1].v[1] * self.data[2].v[2] - self.data[2].v[1] * self.data[1].v[2]);
                 res.data[1].v[0] = -(self.data[1].v[0] * self.data[2].v[2] - self.data[2].v[0] * self.data[1].v[2]);
@@ -276,7 +276,7 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
                 res.data[1].v[2] = -(self.data[0].v[0] * self.data[1].v[2] - self.data[1].v[0] * self.data[0].v[2]);
                 res.data[2].v[2] = (self.data[0].v[0] * self.data[1].v[1] - self.data[1].v[0] * self.data[0].v[1]);
                 return res.mulScalar(OneOverDeterminant);
-            } else if (comptime R == 4) {
+            } else if (comptime num_rows == 4) {
                 const Coef00 = self.data[2].v[2] * self.data[3].v[3] - self.data[3].v[2] * self.data[2].v[3];
                 const Coef02 = self.data[1].v[2] * self.data[3].v[3] - self.data[3].v[2] * self.data[1].v[3];
                 const Coef03 = self.data[1].v[2] * self.data[2].v[3] - self.data[2].v[2] * self.data[1].v[3];
@@ -296,25 +296,25 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
                 const Coef22 = self.data[1].v[0] * self.data[3].v[1] - self.data[3].v[0] * self.data[1].v[1];
                 const Coef23 = self.data[1].v[0] * self.data[2].v[1] - self.data[2].v[0] * self.data[1].v[1];
 
-                const Fac0 = Vec(4, T).init(.{ Coef00, Coef00, Coef02, Coef03 });
-                const Fac1 = Vec(4, T).init(.{ Coef04, Coef04, Coef06, Coef07 });
-                const Fac2 = Vec(4, T).init(.{ Coef08, Coef08, Coef10, Coef11 });
-                const Fac3 = Vec(4, T).init(.{ Coef12, Coef12, Coef14, Coef15 });
-                const Fac4 = Vec(4, T).init(.{ Coef16, Coef16, Coef18, Coef19 });
-                const Fac5 = Vec(4, T).init(.{ Coef20, Coef20, Coef22, Coef23 });
+                const Fac0 = Vec(4, scalar_type).init(.{ Coef00, Coef00, Coef02, Coef03 });
+                const Fac1 = Vec(4, scalar_type).init(.{ Coef04, Coef04, Coef06, Coef07 });
+                const Fac2 = Vec(4, scalar_type).init(.{ Coef08, Coef08, Coef10, Coef11 });
+                const Fac3 = Vec(4, scalar_type).init(.{ Coef12, Coef12, Coef14, Coef15 });
+                const Fac4 = Vec(4, scalar_type).init(.{ Coef16, Coef16, Coef18, Coef19 });
+                const Fac5 = Vec(4, scalar_type).init(.{ Coef20, Coef20, Coef22, Coef23 });
 
-                const Vec0 = Vec(4, T).init(.{ self.data[1].v[0], self.data[0].v[0], self.data[0].v[0], self.data[0].v[0] });
-                const Vec1 = Vec(4, T).init(.{ self.data[1].v[1], self.data[0].v[1], self.data[0].v[1], self.data[0].v[1] });
-                const Vec2 = Vec(4, T).init(.{ self.data[1].v[2], self.data[0].v[2], self.data[0].v[2], self.data[0].v[2] });
-                const Vec3 = Vec(4, T).init(.{ self.data[1].v[3], self.data[0].v[3], self.data[0].v[3], self.data[0].v[3] });
+                const Vec0 = Vec(4, scalar_type).init(.{ self.data[1].v[0], self.data[0].v[0], self.data[0].v[0], self.data[0].v[0] });
+                const Vec1 = Vec(4, scalar_type).init(.{ self.data[1].v[1], self.data[0].v[1], self.data[0].v[1], self.data[0].v[1] });
+                const Vec2 = Vec(4, scalar_type).init(.{ self.data[1].v[2], self.data[0].v[2], self.data[0].v[2], self.data[0].v[2] });
+                const Vec3 = Vec(4, scalar_type).init(.{ self.data[1].v[3], self.data[0].v[3], self.data[0].v[3], self.data[0].v[3] });
 
                 const Inv0 = Vec1.mul(Fac0).sub(Vec2.mul(Fac1)).add(Vec3.mul(Fac2));
                 const Inv1 = Vec0.mul(Fac0).sub(Vec2.mul(Fac3)).add(Vec3.mul(Fac4));
                 const Inv2 = Vec0.mul(Fac1).sub(Vec1.mul(Fac3)).add(Vec3.mul(Fac5));
                 const Inv3 = Vec0.mul(Fac2).sub(Vec1.mul(Fac4)).add(Vec2.mul(Fac5));
 
-                const SignA = Vec(4, T).init(.{ @as(T, 1), @as(T, -1), @as(T, 1), @as(T, -1) });
-                const SignB = Vec(4, T).init(.{ @as(T, -1), @as(T, 1), @as(T, -1), @as(T, 1) });
+                const SignA = Vec(4, scalar_type).init(.{ @as(scalar_type, 1), @as(scalar_type, -1), @as(scalar_type, 1), @as(scalar_type, -1) });
+                const SignB = Vec(4, scalar_type).init(.{ @as(scalar_type, -1), @as(scalar_type, 1), @as(scalar_type, -1), @as(scalar_type, 1) });
                 const Inverse = init(.{
                     Inv0.mul(SignA),
                     Inv1.mul(SignB),
@@ -322,11 +322,11 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
                     Inv3.mul(SignB),
                 });
 
-                const Row0 = Vec(4, T).init(.{ Inverse.data[0].v[0], Inverse.data[1].v[0], Inverse.data[2].v[0], Inverse.data[3].v[0] });
+                const Row0 = Vec(4, scalar_type).init(.{ Inverse.data[0].v[0], Inverse.data[1].v[0], Inverse.data[2].v[0], Inverse.data[3].v[0] });
                 const Dot0 = self.data[0].mul(Row0);
                 const Dot1 = (Dot0.v[0] + Dot0.v[1]) + (Dot0.v[2] + Dot0.v[3]);
 
-                const OneOverDeterminant = @as(T, 1) / Dot1;
+                const OneOverDeterminant = @as(scalar_type, 1) / Dot1;
                 return Inverse.mulScalar(OneOverDeterminant);
             } else {
                 @compileError("inverse only supported for 2x2, 3x3 and 4x4 matrices");
@@ -340,8 +340,8 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// makes the translation live in the LOCAL frame of `self`. Compose
         /// left-to-right: `matrix.identity().translate(t).rotate(θ, axis)` puts
         /// the rotation around the translated origin.
-        pub fn translate(self: Self, translation: Vec(3, T)) Self {
-            if (comptime C != 4 or R != 4) @compileError("translate requires a 4x4 matrix");
+        pub fn translate(self: Self, translation: Vec(3, scalar_type)) Self {
+            if (comptime num_columns != 4 or num_rows != 4) @compileError("translate requires a 4x4 matrix");
             var res = self;
             res.data[3] = self.data[0].mul(translation.v[0])
                 .add(self.data[1].mul(translation.v[1]))
@@ -354,8 +354,8 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// first three columns by the respective `v` components, keeping the
         /// translation column untouched, so the scale is applied in the
         /// local frame too. `scale(v)` with `v = (1,1,1)` is a no-op.
-        pub fn scale(self: Self, scale_factors: Vec(3, T)) Self {
-            if (comptime C != 4 or R != 4) @compileError("scale requires a 4x4 matrix");
+        pub fn scale(self: Self, scale_factors: Vec(3, scalar_type)) Self {
+            if (comptime num_columns != 4 or num_rows != 4) @compileError("scale requires a 4x4 matrix");
             var res: Self = undefined;
             res.data[0] = self.data[0].mul(scale_factors.v[0]);
             res.data[1] = self.data[1].mul(scale_factors.v[1]);
@@ -370,12 +370,12 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// rotation is applied before `self`'s translation, i.e. around the
         /// origin of `self`. Counter-clockwise for positive angles around
         /// the positive axis (right-handed convention).
-        pub fn rotate(self: Self, angle: T, axis: Vec(3, T)) Self {
-            if (comptime C != 4 or R != 4) @compileError("rotate requires a 4x4 matrix");
+        pub fn rotate(self: Self, angle: scalar_type, axis: Vec(3, scalar_type)) Self {
+            if (comptime num_columns != 4 or num_rows != 4) @compileError("rotate requires a 4x4 matrix");
             const c = scalar.cos(angle);
             const s = scalar.sin(angle);
             const axis_normal = axis.normalize();
-            const temp = axis_normal.mul(@as(T, 1) - c);
+            const temp = axis_normal.mul(@as(scalar_type, 1) - c);
             var rot = Self.zero();
             rot.data[0].v[0] = c + temp.v[0] * axis_normal.v[0];
             rot.data[0].v[1] = temp.v[0] * axis_normal.v[1] + s * axis_normal.v[2];
@@ -405,54 +405,54 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// slot, reproducing GLM's historical padding quirks exactly
         /// (verified against GLM 1.1 ref output). Use to lift a 2D/3D
         /// transform into homogeneous space.
-        pub fn toMat4(self: Self) Mat(4, 4, T) {
-            if (comptime C == 4 and R == 4) return self;
+        pub fn toMat4(self: Self) Mat(4, 4, scalar_type) {
+            if (comptime num_columns == 4 and num_rows == 4) return self;
             const c0 = self.data[0];
             const c1 = self.data[1];
-            if (comptime C >= 3 and R >= 3) {
+            if (comptime num_columns >= 3 and num_rows >= 3) {
                 // 3x3 / 3x4 / 4x3
-                if (comptime R == 4) {
-                    return Mat(4, 4, T).init(.{ c0, c1, self.data[2], Vec(4, T).init(.{ 0, 0, 0, 1 }) });
-                } else if (comptime R == 3) {
-                    return Mat(4, 4, T).init(.{
-                        Vec(4, T).init(.{ c0.v[0], c0.v[1], c0.v[2], 0 }),
-                        Vec(4, T).init(.{ c1.v[0], c1.v[1], c1.v[2], 0 }),
-                        Vec(4, T).init(.{ self.data[2].v[0], self.data[2].v[1], self.data[2].v[2], 0 }),
-                        Vec(4, T).init(.{ 0, 0, 0, 1 }),
+                if (comptime num_rows == 4) {
+                    return Mat(4, 4, scalar_type).init(.{ c0, c1, self.data[2], Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }) });
+                } else if (comptime num_rows == 3) {
+                    return Mat(4, 4, scalar_type).init(.{
+                        Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], c0.v[2], 0 }),
+                        Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], c1.v[2], 0 }),
+                        Vec(4, scalar_type).init(.{ self.data[2].v[0], self.data[2].v[1], self.data[2].v[2], 0 }),
+                        Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }),
                     });
                 } else {
                     @compileError("toMat4: unsupported shape");
                 }
-            } else if (comptime C == 3 and R == 2) {
-                return Mat(4, 4, T).init(.{
-                    Vec(4, T).init(.{ c0.v[0], c0.v[1], 0, 0 }),
-                    Vec(4, T).init(.{ c1.v[0], c1.v[1], 0, 0 }),
-                    Vec(4, T).init(.{ self.data[2].v[0], self.data[2].v[1], 1, 0 }),
-                    Vec(4, T).init(.{ 0, 0, 0, 1 }),
+            } else if (comptime num_columns == 3 and num_rows == 2) {
+                return Mat(4, 4, scalar_type).init(.{
+                    Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], 0, 0 }),
+                    Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], 0, 0 }),
+                    Vec(4, scalar_type).init(.{ self.data[2].v[0], self.data[2].v[1], 1, 0 }),
+                    Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }),
                 });
-            } else if (comptime C == 4 and R == 2) {
-                return Mat(4, 4, T).init(.{
-                    Vec(4, T).init(.{ c0.v[0], c0.v[1], 0, 0 }),
-                    Vec(4, T).init(.{ c1.v[0], c1.v[1], 0, 0 }),
-                    Vec(4, T).init(.{ 0, 0, 1, 0 }),
-                    Vec(4, T).init(.{ 0, 0, 0, 1 }),
+            } else if (comptime num_columns == 4 and num_rows == 2) {
+                return Mat(4, 4, scalar_type).init(.{
+                    Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], 0, 0 }),
+                    Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], 0, 0 }),
+                    Vec(4, scalar_type).init(.{ 0, 0, 1, 0 }),
+                    Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }),
                 });
-            } else if (comptime C == 2) {
-                const pad2 = Vec(4, T).init(.{ 0, 0, 1, 0 });
-                const pad3 = Vec(4, T).init(.{ 0, 0, 0, 1 });
-                if (comptime R == 4) {
-                    return Mat(4, 4, T).init(.{ c0, c1, pad2, pad3 });
-                } else if (comptime R == 3) {
-                    return Mat(4, 4, T).init(.{
-                        Vec(4, T).init(.{ c0.v[0], c0.v[1], c0.v[2], 0 }),
-                        Vec(4, T).init(.{ c1.v[0], c1.v[1], c1.v[2], 0 }),
+            } else if (comptime num_columns == 2) {
+                const pad2 = Vec(4, scalar_type).init(.{ 0, 0, 1, 0 });
+                const pad3 = Vec(4, scalar_type).init(.{ 0, 0, 0, 1 });
+                if (comptime num_rows == 4) {
+                    return Mat(4, 4, scalar_type).init(.{ c0, c1, pad2, pad3 });
+                } else if (comptime num_rows == 3) {
+                    return Mat(4, 4, scalar_type).init(.{
+                        Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], c0.v[2], 0 }),
+                        Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], c1.v[2], 0 }),
                         pad2,
                         pad3,
                     });
                 } else {
-                    return Mat(4, 4, T).init(.{
-                        Vec(4, T).init(.{ c0.v[0], c0.v[1], 0, 0 }),
-                        Vec(4, T).init(.{ c1.v[0], c1.v[1], 0, 0 }),
+                    return Mat(4, 4, scalar_type).init(.{
+                        Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], 0, 0 }),
+                        Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], 0, 0 }),
                         pad2,
                         pad3,
                     });
@@ -471,8 +471,8 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
             _ = fmt;
             _ = options;
             try writer.writeByte('{');
-            for (0..C) |c| {
-                for (0..R) |r| {
+            for (0..num_columns) |c| {
+                for (0..num_rows) |r| {
                     try writer.print("{d},", .{self.data[c].v[r]});
                 }
             }
@@ -485,25 +485,25 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// meaning — just |element|, e.g. to compare transform magnitudes.
         pub inline fn abs(self: Self) Self {
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].abs();
+            inline for (0..num_columns) |c| res.data[c] = self.data[c].abs();
             return res;
         }
 
-        /// Blend between `self` and `rhs` (GLM `mix(x, y, a)`):
+        /// Blend between `self` and `right_hand_side` (GLM `mix(x, y, a)`):
         /// - `a` scalar: per-element `x·(1−a) + y·a` (the linear lerp),
         /// - `a` matrix: GLM's quirky elementwise formula
         ///   `x · (ones() − a) + y · a` — note the `1` is a full ones
         ///   matrix, NOT the identity, so off-diagonal elements blend too.
         /// Use the scalar form to fade between two keyframe transforms.
-        pub fn mix(self: Self, rhs: Self, factor: anytype) Self {
+        pub fn mix(self: Self, right_hand_side: Self, factor: anytype) Self {
             const AT = @TypeOf(factor);
             if (comptime isMat(AT)) {
                 const ones_minus = ones().sub(factor);
-                return self.matrixCompMult(ones_minus).add(rhs.matrixCompMult(factor));
+                return self.matrixCompMult(ones_minus).add(right_hand_side.matrixCompMult(factor));
             }
-            const factor_value: T = scalar.cast(T, factor);
+            const factor_value: scalar_type = scalar.cast(scalar_type, factor);
             var res: Self = undefined;
-            inline for (0..C) |c| res.data[c] = self.data[c].mul(@as(T, 1) - factor_value).add(rhs.data[c].mul(factor_value));
+            inline for (0..num_columns) |c| res.data[c] = self.data[c].mul(@as(scalar_type, 1) - factor_value).add(right_hand_side.data[c].mul(factor_value));
             return res;
         }
 
@@ -511,17 +511,17 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
 
         /// Backend of the four tolerance comparisons: for each column c,
         /// bits[c] is true iff the column vectors `self.data[c]` and
-        /// `rhs.data[c]` agree (need_all) or differ (any) within the
+        /// `right_hand_side.data[c]` agree (need_all) or differ (any) within the
         /// per-column tolerance `arg` — which may be a scalar or a vector
         /// whose component c holds column c's tolerance. `ulp` selects the
         /// ULP metric instead of the absolute epsilon.
-        fn colCmp(self: Self, rhs: Self, comptime need_all: bool, tolerance: anytype, comptime ulp: bool) Vec(C, bool) {
+        fn colCmp(self: Self, right_hand_side: Self, comptime need_all: bool, tolerance: anytype, comptime ulp: bool) Vec(num_columns, bool) {
             const AT = @TypeOf(tolerance);
             const av = comptime vec.isVec(AT);
-            var res: @Vector(C, bool) = undefined;
-            inline for (0..C) |c| {
+            var res: @Vector(num_columns, bool) = undefined;
+            inline for (0..num_columns) |c| {
                 const a = self.data[c];
-                const b = rhs.data[c];
+                const b = right_hand_side.data[c];
                 const bit = if (comptime need_all) blk: {
                     if (comptime ulp) {
                         const e = a.equalULP(b, if (av) tolerance.v[c] else tolerance);
@@ -549,18 +549,18 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// on floats). Intended for integer matrices; for float work use
         /// `equalEps`/`equalULP` — exact equality is almost never what you
         /// want after arithmetic.
-        pub fn equal(self: Self, rhs: Self) Vec(C, bool) {
-            var res: @Vector(C, bool) = undefined;
-            inline for (0..C) |c| res[c] = self.data[c].equal(rhs.data[c]).all();
+        pub fn equal(self: Self, right_hand_side: Self) Vec(num_columns, bool) {
+            var res: @Vector(num_columns, bool) = undefined;
+            inline for (0..num_columns) |c| res[c] = self.data[c].equal(right_hand_side.data[c]).all();
             return .{ .v = res };
         }
 
         /// Per-column inequality (GLM `notEqual(mat, mat)`): result column c is
         /// true iff ANY component of column c differs. The negation of
         /// `equal`.
-        pub fn notEqual(self: Self, rhs: Self) Vec(C, bool) {
-            var res: @Vector(C, bool) = undefined;
-            inline for (0..C) |c| res[c] = self.data[c].notEqual(rhs.data[c]).any();
+        pub fn notEqual(self: Self, right_hand_side: Self) Vec(num_columns, bool) {
+            var res: @Vector(num_columns, bool) = undefined;
+            inline for (0..num_columns) |c| res[c] = self.data[c].notEqual(right_hand_side.data[c]).any();
             return .{ .v = res };
         }
 
@@ -568,30 +568,30 @@ pub fn Mat(comptime C: usize, comptime R: usize, comptime T: type) type {
         /// is true iff every element of column c differs by < `eps[c]`
         /// (eps vector) or < `eps` (scalar). The standard way to assert two
         /// transform matrices are "the same" after floating-point work.
-        pub fn equalEps(self: Self, rhs: Self, epsilon: anytype) Vec(C, bool) {
-            return self.colCmp(rhs, true, epsilon, false);
+        pub fn equalEps(self: Self, right_hand_side: Self, epsilon: anytype) Vec(num_columns, bool) {
+            return self.colCmp(right_hand_side, true, epsilon, false);
         }
 
         /// Per-column tolerance inequality (GLM `notEqual(mat, mat, eps)`):
         /// column c is true iff some element of column c differs by at
         /// least the given tolerance.
-        pub fn notEqualEps(self: Self, rhs: Self, epsilon: anytype) Vec(C, bool) {
-            return self.colCmp(rhs, false, epsilon, false);
+        pub fn notEqualEps(self: Self, right_hand_side: Self, epsilon: anytype) Vec(num_columns, bool) {
+            return self.colCmp(right_hand_side, false, epsilon, false);
         }
 
         /// Per-column ULP equality (GLM `equal(mat, mat, maxULPs)`): like
         /// `equalEps`, but the tolerance is measured in representable float
         /// steps, so it stays meaningful across exponent scales — use for
         /// numerically-generated matrices (e.g. iterative inverses).
-        pub fn equalULP(self: Self, rhs: Self, max_ulps: anytype) Vec(C, bool) {
-            return self.colCmp(rhs, true, max_ulps, true);
+        pub fn equalULP(self: Self, right_hand_side: Self, max_ulps: anytype) Vec(num_columns, bool) {
+            return self.colCmp(right_hand_side, true, max_ulps, true);
         }
 
         /// Per-column ULP inequality (GLM `notEqual(mat, mat, maxULPs)`): the
         /// negation of `equalULP` — column c is true iff some element
         /// exceeds the ULP budget.
-        pub fn notEqualULP(self: Self, rhs: Self, max_ulps: anytype) Vec(C, bool) {
-            return self.colCmp(rhs, false, max_ulps, true);
+        pub fn notEqualULP(self: Self, right_hand_side: Self, max_ulps: anytype) Vec(num_columns, bool) {
+            return self.colCmp(right_hand_side, false, max_ulps, true);
         }
     };
 }
@@ -1291,7 +1291,7 @@ pub fn affineInverse3(matrix: Mat(3, 3, f32)) Mat(3, 3, f32) {
 }
 
 /// Inverse of a 4x4 affine matrix (GLM `affineInverse`): inverts the
-/// upper-left 3x3 and folds the translation in as `−R⁻¹·t`; bottom
+/// upper-left 3x3 and folds the translation in as `−num_rows⁻¹·t`; bottom
 /// row stays [0, 0, 0, 1]. The right tool for view/model matrices
 /// (rigid body transforms) — an order of magnitude less work than
 /// the full cofactor `inverse`.
@@ -1417,10 +1417,10 @@ pub fn inverseTranspose(matrix: mat4) mat4 {
 /// matrix such as the projector `outerProduct(n, n)` or the dyad
 /// `I − 2·outerProduct(n, n)` used in reflections.
 pub fn outerProduct(col_vec: anytype, row_vec: anytype) Mat(@TypeOf(row_vec).len, @TypeOf(col_vec).len, @TypeOf(col_vec).value_type) {
-    const T = @TypeOf(col_vec).value_type;
+    const scalar_type = @TypeOf(col_vec).value_type;
     const CL = @TypeOf(col_vec).len;
     const RL = @TypeOf(row_vec).len;
-    var res: Mat(RL, CL, T) = undefined;
+    var res: Mat(RL, CL, scalar_type) = undefined;
     inline for (0..RL) |i| {
         inline for (0..CL) |j| res.data[i].v[j] = col_vec.v[j] * row_vec.v[i];
     }

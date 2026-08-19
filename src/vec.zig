@@ -1,6 +1,6 @@
-//! Vector math — a GLM-compatible `vec<L, T>`.
+//! Vector math — a GLM-compatible `vec<component_count, scalar_type>`.
 //!
-//! `Vec(L, T)` stores `L` components of type `T` in a Zig SIMD `@Vector(L, T)`
+//! `Vec(component_count, scalar_type)` stores `component_count` components of type `scalar_type` in a Zig SIMD `@Vector(component_count, scalar_type)`
 //! and exposes per-component and geometric operations as methods, mirroring
 //! GLM's free functions with the receiver as first argument
 //! (`a.dot(b)` == GLM `dot(a, b)`).
@@ -13,24 +13,36 @@
 const std = @import("std");
 const scalar = @import("scalar.zig");
 
-/// Returns `true` if `T` is a vector type produced by `Vec(L, T)` (it has
+/// Comparison operations for the relational methods (`lessThan`, `lessThanEqual`,
+/// `greaterThan`, `greaterThanEqual`, `equal`, `notEqual`): each member is the
+/// full spelling of the corresponding binary operator. Passed to `compare`.
+pub const Comparison = enum {
+    less_than,
+    less_than_equal,
+    greater_than,
+    greater_than_equal,
+    equal,
+    not_equal,
+};
+
+/// Returns `true` if `candidate_type` is a vector type produced by `Vec(component_count, scalar_type)` (it has
 /// the `len` declaration and a `v` field). Use to dispatch vector vs scalar
 /// arguments in generic code.
-pub fn isVec(comptime T: type) bool {
-    return @typeInfo(T) == .@"struct" and @hasDecl(T, "len") and @hasField(T, "v");
+pub fn isVec(comptime candidate_type: type) bool {
+    return @typeInfo(candidate_type) == .@"struct" and @hasDecl(candidate_type, "len") and @hasField(candidate_type, "v");
 }
 
 const floatType = scalar.floatType;
 
-/// Create a vector type with `L` components of type `T` (float, int or bool).
+/// Create a vector type with `component_count` components of type `scalar_type` (float, int or bool).
 /// The type name doubles as a namespace: `vec3.zero()`, `Vec(4, f32).one()`.
-pub fn Vec(comptime L: usize, comptime T: type) type {
+pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
     return struct {
         pub const Self = @This();
-        pub const len: comptime_int = L;
-        pub const value_type: type = T;
-        pub const storage_type: type = @Vector(L, T);
-        pub const float_type: type = floatType(T);
+        pub const len: comptime_int = component_count;
+        pub const value_type: type = scalar_type;
+        pub const storage_type: type = @Vector(component_count, scalar_type);
+        pub const float_type: type = floatType(scalar_type);
 
         v: storage_type,
 
@@ -39,27 +51,27 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Vector with all components set to `0`. The zero vector is the
         /// additive identity: `v.add(vec3.zero()) == v`.
         pub inline fn zero() Self {
-            return .{ .v = @splat(scalar.cast(T, 0)) };
+            return .{ .v = @splat(scalar.cast(scalar_type, 0)) };
         }
 
         /// Vector with all components set to `1`. With floats this is the
         /// multiplicative identity; with ints it is the bitmap of all-zero
         /// bits.
         pub inline fn one() Self {
-            return .{ .v = @splat(scalar.cast(T, 1)) };
+            return .{ .v = @splat(scalar.cast(scalar_type, 1)) };
         }
 
         /// Vector with every component set to `v`: `vec3.fill(0.5)`.
         pub inline fn fill(value: anytype) Self {
-            return .{ .v = @splat(scalar.cast(T, value)) };
+            return .{ .v = @splat(scalar.cast(scalar_type, value)) };
         }
 
         /// Basis vector with a single `1` at component `i` (0-based):
         /// `vec3.unit(1) == vec3(0, 1, 0)`. Use for axis-aligned
         /// directions.
         pub inline fn unit(comptime i: usize) Self {
-            var r: storage_type = @splat(scalar.cast(T, 0));
-            r[i] = scalar.cast(T, 1);
+            var r: storage_type = @splat(scalar.cast(scalar_type, 0));
+            r[i] = scalar.cast(scalar_type, 1);
             return .{ .v = r };
         }
 
@@ -69,14 +81,14 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         ///   happens naturally: `vec4.init(v3)` keeps the first three),
         /// - a tuple of scalars and/or vectors, concatenated in order:
         ///   `vec4.init(.{ v2, 1.0, 2.0 })`, `vec3.init(.{ v2, v2.x() })`.
-        /// All values are cast to `T`. Use for building points/colors from
+        /// All values are cast to `scalar_type`. Use for building points/colors from
         /// parts of existing vectors.
         pub fn init(args: anytype) Self {
             const AT = @TypeOf(args);
             if (comptime AT == Self) return args;
             if (comptime isVec(AT)) {
                 var r: storage_type = undefined;
-                inline for (0..L) |i| r[i] = scalar.cast(T, args.v[i]);
+                inline for (0..component_count) |i| r[i] = scalar.cast(scalar_type, args.v[i]);
                 return .{ .v = r };
             }
             if (comptime scalar.isNumber(AT)) return fill(args);
@@ -88,17 +100,17 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
                 const ET = @TypeOf(e);
                 if (comptime isVec(ET)) {
                     inline for (0..@TypeOf(e).len) |k| {
-                        if (comptime n >= L) @compileError("Vec init: too many components");
-                        r[n] = scalar.cast(T, e.v[k]);
+                        if (comptime n >= component_count) @compileError("Vec init: too many components");
+                        r[n] = scalar.cast(scalar_type, e.v[k]);
                         n += 1;
                     }
                 } else {
-                    if (comptime n >= L) @compileError("Vec init: too many components");
-                    r[n] = scalar.cast(T, e);
+                    if (comptime n >= component_count) @compileError("Vec init: too many components");
+                    r[n] = scalar.cast(scalar_type, e);
                     n += 1;
                 }
             }
-            if (comptime n != L) @compileError("Vec init: expected " ++ comptimePrint("{d}", .{L}) ++ " components, got " ++ comptimePrint("{d}", .{n}));
+            if (comptime n != component_count) @compileError("Vec init: expected " ++ comptimePrint("{d}", .{component_count}) ++ " components, got " ++ comptimePrint("{d}", .{n}));
             return .{ .v = r };
         }
 
@@ -107,59 +119,59 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Read component `i` (0-based, runtime value). Prefer `x`/`y`/`z`/`w`
         /// when the index is known at compile time — they compile to direct
         /// vector lane access without bounds checks.
-        pub inline fn get(self: Self, i: usize) T {
+        pub inline fn get(self: Self, i: usize) scalar_type {
             const p: *const storage_type = &self.v;
             return p[i];
         }
 
         /// Write component `i` of a mutable vector: `v.set(2, 3.0)`.
-        pub inline fn set(self: *Self, i: usize, value: T) void {
+        pub inline fn set(self: *Self, i: usize, value: scalar_type) void {
             self.v[i] = value;
         }
 
         /// First component (x). GLSL `.x` selector.
-        pub inline fn x(self: Self) T {
+        pub inline fn x(self: Self) scalar_type {
             return self.v[0];
         }
 
         /// Second component (y). Compile-time error for vectors of length 1.
-        pub inline fn y(self: Self) T {
-            if (comptime L < 2) @compileError("vector has no y component");
+        pub inline fn y(self: Self) scalar_type {
+            if (comptime component_count < 2) @compileError("vector has no y component");
             return self.v[1];
         }
 
         /// Third component (z). Compile-time error for vectors of length < 3.
-        pub inline fn z(self: Self) T {
-            if (comptime L < 3) @compileError("vector has no z component");
+        pub inline fn z(self: Self) scalar_type {
+            if (comptime component_count < 3) @compileError("vector has no z component");
             return self.v[2];
         }
 
         /// Fourth component (w). Compile-time error for vectors of length < 4.
-        pub inline fn w(self: Self) T {
-            if (comptime L < 4) @compileError("vector has no w component");
+        pub inline fn w(self: Self) scalar_type {
+            if (comptime component_count < 4) @compileError("vector has no w component");
             return self.v[3];
         }
 
         /// Set the first component of a mutable vector.
-        pub inline fn setX(self: *Self, value: T) void {
+        pub inline fn setX(self: *Self, value: scalar_type) void {
             self.v[0] = value;
         }
 
         /// Set the second component of a mutable vector.
-        pub inline fn setY(self: *Self, value: T) void {
-            if (comptime L < 2) @compileError("vector has no y component");
+        pub inline fn setY(self: *Self, value: scalar_type) void {
+            if (comptime component_count < 2) @compileError("vector has no y component");
             self.v[1] = value;
         }
 
         /// Set the third component of a mutable vector.
-        pub inline fn setZ(self: *Self, value: T) void {
-            if (comptime L < 3) @compileError("vector has no z component");
+        pub inline fn setZ(self: *Self, value: scalar_type) void {
+            if (comptime component_count < 3) @compileError("vector has no z component");
             self.v[2] = value;
         }
 
         /// Set the fourth component of a mutable vector.
-        pub inline fn setW(self: *Self, value: T) void {
-            if (comptime L < 4) @compileError("vector has no w component");
+        pub inline fn setW(self: *Self, value: scalar_type) void {
+            if (comptime component_count < 4) @compileError("vector has no w component");
             self.v[3] = value;
         }
 
@@ -168,95 +180,95 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Build a 2-component vector from components `a` and `b`. This is
         /// the GLSL swizzle mechanism: `v.zy()` reorders lanes; the source
         /// vector is copied, never modified.
-        inline fn swz2(self: Self, comptime index1: usize, comptime index2: usize) Vec(2, T) {
-            return .{ .v = @Vector(2, T){ self.v[index1], self.v[index2] } };
+        inline fn swz2(self: Self, comptime index1: usize, comptime index2: usize) Vec(2, scalar_type) {
+            return .{ .v = @Vector(2, scalar_type){ self.v[index1], self.v[index2] } };
         }
 
         /// Build a 3-component vector from any three components of `self`
         /// (GLSL swizzle, e.g. `v.zxy()`). Copies, never reorders in place.
-        inline fn swz3(self: Self, comptime index1: usize, comptime index2: usize, comptime index3: usize) Vec(3, T) {
-            return .{ .v = @Vector(3, T){ self.v[index1], self.v[index2], self.v[index3] } };
+        inline fn swz3(self: Self, comptime index1: usize, comptime index2: usize, comptime index3: usize) Vec(3, scalar_type) {
+            return .{ .v = @Vector(3, scalar_type){ self.v[index1], self.v[index2], self.v[index3] } };
         }
 
         /// Components (x, y) as a 2-vector: the standard way to drop z/w.
-        pub inline fn xy(self: Self) Vec(2, T) {
-            if (comptime L < 2) @compileError("swizzle out of range");
+        pub inline fn xy(self: Self) Vec(2, scalar_type) {
+            if (comptime component_count < 2) @compileError("swizzle out of range");
             return self.swz2(0, 1);
         }
 
         /// Components (x, z) as a 2-vector. Typical use: extract the ground
         /// plane position of a 3D point, dropping height.
-        pub inline fn xz(self: Self) Vec(2, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn xz(self: Self) Vec(2, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz2(0, 2);
         }
 
         /// Components (y, z) as a 2-vector.
-        pub inline fn yz(self: Self) Vec(2, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn yz(self: Self) Vec(2, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz2(1, 2);
         }
 
         /// Components (x, w) as a 2-vector.
-        pub inline fn xw(self: Self) Vec(2, T) {
-            if (comptime L < 4) @compileError("swizzle out of range");
+        pub inline fn xw(self: Self) Vec(2, scalar_type) {
+            if (comptime component_count < 4) @compileError("swizzle out of range");
             return self.swz2(0, 3);
         }
 
         /// Components (y, w) as a 2-vector.
-        pub inline fn yw(self: Self) Vec(2, T) {
-            if (comptime L < 4) @compileError("swizzle out of range");
+        pub inline fn yw(self: Self) Vec(2, scalar_type) {
+            if (comptime component_count < 4) @compileError("swizzle out of range");
             return self.swz2(1, 3);
         }
 
         /// Components (z, w) as a 2-vector.
-        pub inline fn zw(self: Self) Vec(2, T) {
-            if (comptime L < 4) @compileError("swizzle out of range");
+        pub inline fn zw(self: Self) Vec(2, scalar_type) {
+            if (comptime component_count < 4) @compileError("swizzle out of range");
             return self.swz2(2, 3);
         }
 
         /// Components (x, y, z) as a 3-vector: the usual way to get the
         /// positional part of a homogeneous 4-vector.
-        pub inline fn xyz(self: Self) Vec(3, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn xyz(self: Self) Vec(3, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz3(0, 1, 2);
         }
 
         /// Components (x, z, y) as a 3-vector.
-        pub inline fn xzy(self: Self) Vec(3, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn xzy(self: Self) Vec(3, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz3(0, 2, 1);
         }
 
         /// Components (y, x, z) as a 3-vector.
-        pub inline fn yxz(self: Self) Vec(3, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn yxz(self: Self) Vec(3, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz3(1, 0, 2);
         }
 
         /// Components (y, z, x) as a 3-vector.
-        pub inline fn yzx(self: Self) Vec(3, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn yzx(self: Self) Vec(3, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz3(1, 2, 0);
         }
 
         /// Components (z, x, y) as a 3-vector.
-        pub inline fn zxy(self: Self) Vec(3, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn zxy(self: Self) Vec(3, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz3(2, 0, 1);
         }
 
         /// Components (z, y, x) as a 3-vector.
-        pub inline fn zyx(self: Self) Vec(3, T) {
-            if (comptime L < 3) @compileError("swizzle out of range");
+        pub inline fn zyx(self: Self) Vec(3, scalar_type) {
+            if (comptime component_count < 3) @compileError("swizzle out of range");
             return self.swz3(2, 1, 0);
         }
 
         /// All four components as a 4-vector. On a vec4 this is a copy; on a
         /// vec2/vec3 it pads with zeroes.
-        pub inline fn xyzw(self: Self) Vec(4, T) {
-            if (comptime L < 4) @compileError("swizzle out of range");
-            return .{ .v = @Vector(4, T){ self.v[0], self.v[1], self.v[2], self.v[3] } };
+        pub inline fn xyzw(self: Self) Vec(4, scalar_type) {
+            if (comptime component_count < 4) @compileError("swizzle out of range");
+            return .{ .v = @Vector(4, scalar_type){ self.v[0], self.v[1], self.v[2], self.v[3] } };
         }
 
         // ---- element-wise application helpers ----
@@ -266,22 +278,22 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// per-component methods.
         fn apply(self: Self, comptime func: anytype) Self {
             var r: storage_type = undefined;
-            inline for (0..L) |i| r[i] = func(self.v[i]);
+            inline for (0..component_count) |i| r[i] = func(self.v[i]);
             return .{ .v = r };
         }
 
         /// Apply binary scalar function `f(self[i], b)` per component; `b`
         /// may be a full vector (component-wise) or a scalar (broadcast to
         /// every lane). Backend of min/max/pow/fmin, etc.
-        fn apply2(self: Self, rhs: anytype, comptime func: anytype) Self {
-            const BT = @TypeOf(rhs);
+        fn apply2(self: Self, right_hand_side: anytype, comptime func: anytype) Self {
+            const BT = @TypeOf(right_hand_side);
             if (comptime isVec(BT)) {
                 var r: storage_type = undefined;
-                inline for (0..L) |i| r[i] = func(self.v[i], rhs.v[i]);
+                inline for (0..component_count) |i| r[i] = func(self.v[i], right_hand_side.v[i]);
                 return .{ .v = r };
             } else {
                 var r: storage_type = undefined;
-                inline for (0..L) |i| r[i] = func(self.v[i], rhs);
+                inline for (0..component_count) |i| r[i] = func(self.v[i], right_hand_side);
                 return .{ .v = r };
             }
         }
@@ -290,15 +302,15 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// with mixed vector/scalar operands; the receiver is passed last so
         /// that `self.clamp(lo, hi)` == GLM `clamp(self, lo, hi)`. Backend of
         /// clamp/smoothstep/fclamp.
-        fn apply3(self: Self, rhs1: anytype, rhs2: anytype, comptime func: anytype) Self {
-            const BT = @TypeOf(rhs1);
-            const CT = @TypeOf(rhs2);
+        fn apply3(self: Self, right_hand_side: anytype, right_hand_side_2: anytype, comptime func: anytype) Self {
+            const BT = @TypeOf(right_hand_side);
+            const CT = @TypeOf(right_hand_side_2);
             const bv = comptime isVec(BT);
             const cv = comptime isVec(CT);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
-                const bi = if (bv) rhs1.v[i] else rhs1;
-                const ci = if (cv) rhs2.v[i] else rhs2;
+            inline for (0..component_count) |i| {
+                const bi = if (bv) right_hand_side.v[i] else right_hand_side;
+                const ci = if (cv) right_hand_side_2.v[i] else right_hand_side_2;
                 r[i] = func(bi, ci, self.v[i]);
             }
             return .{ .v = r };
@@ -306,33 +318,33 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
 
         // ---- arithmetic ----
 
-        /// Component-wise addition. `rhs` may be a vector (lane-wise) or a
+        /// Component-wise addition. `right_hand_side` may be a vector (lane-wise) or a
         /// scalar (added to every lane): `pos.add(vel.mul(dt))`,
         /// `v.add(1)`.
-        pub inline fn add(self: Self, rhs: anytype) Self {
-            if (comptime isVec(@TypeOf(rhs))) return .{ .v = self.v + rhs.v };
-            return .{ .v = self.v + @as(storage_type, @splat(scalar.cast(T, rhs))) };
+        pub inline fn add(self: Self, right_hand_side: anytype) Self {
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v + right_hand_side.v };
+            return .{ .v = self.v + @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
         }
 
-        /// Component-wise subtraction. `rhs` may be a vector or a scalar:
+        /// Component-wise subtraction. `right_hand_side` may be a vector or a scalar:
         /// `a.sub(b)` == GLSL `a - b`. Use for displacement between points.
-        pub inline fn sub(self: Self, rhs: anytype) Self {
-            if (comptime isVec(@TypeOf(rhs))) return .{ .v = self.v - rhs.v };
-            return .{ .v = self.v - @as(storage_type, @splat(scalar.cast(T, rhs))) };
+        pub inline fn sub(self: Self, right_hand_side: anytype) Self {
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v - right_hand_side.v };
+            return .{ .v = self.v - @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
         }
 
-        /// Component-wise multiplication. `rhs` may be a vector (Hadamard
+        /// Component-wise multiplication. `right_hand_side` may be a vector (Hadamard
         /// product, NOT the dot product — use `dot`) or a scalar: scaling a
         /// direction by speed is `dir.mul(10)`.
-        pub inline fn mul(self: Self, rhs: anytype) Self {
-            if (comptime isVec(@TypeOf(rhs))) return .{ .v = self.v * rhs.v };
-            return .{ .v = self.v * @as(storage_type, @splat(scalar.cast(T, rhs))) };
+        pub inline fn mul(self: Self, right_hand_side: anytype) Self {
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v * right_hand_side.v };
+            return .{ .v = self.v * @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
         }
 
-        /// Component-wise division. `rhs` may be a vector or a scalar.
-        pub inline fn div(self: Self, rhs: anytype) Self {
-            if (comptime isVec(@TypeOf(rhs))) return .{ .v = self.v / rhs.v };
-            return .{ .v = self.v / @as(storage_type, @splat(scalar.cast(T, rhs))) };
+        /// Component-wise division. `right_hand_side` may be a vector or a scalar.
+        pub inline fn div(self: Self, right_hand_side: anytype) Self {
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v / right_hand_side.v };
+            return .{ .v = self.v / @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
         }
 
         /// Negate every component: `v.neg()` == GLSL `-v`.
@@ -341,67 +353,67 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         }
 
         /// Component-wise modulo (GLSL `mod(x, y)`, floored, sign follows
-        /// the divisor). `rhs` may be a vector or a scalar: wrap an angle in
+        /// the divisor). `right_hand_side` may be a vector or a scalar: wrap an angle in
         /// [0, 2π) with `.mod(2pi)`.
-        pub inline fn mod(self: Self, rhs: anytype) Self {
-            return self.apply2(rhs, scalar.mod);
+        pub inline fn mod(self: Self, right_hand_side: anytype) Self {
+            return self.apply2(right_hand_side, scalar.mod);
         }
 
         /// Component-wise reciprocal (GLM `inverse(vec)`): `1/x` per lane,
         /// computed via a single SIMD division. Use on a `1/d` precomputed
         /// vector, not on matrices (that is `mat.inverse()`).
         pub inline fn inverse(self: Self) Self {
-            return .{ .v = @as(storage_type, @splat(scalar.cast(T, 1))) / self.v };
+            return .{ .v = @as(storage_type, @splat(scalar.cast(scalar_type, 1))) / self.v };
         }
 
         // ---- relational ----
 
-        /// Backend of the six comparison methods: applies `op` between
-        /// `self`'s lanes and `rhs` lanes (scalar rhs is broadcast), yielding
-        /// a bool vector whose lanes are true where the comparison holds.
-        fn cmp(self: Self, rhs: anytype, comptime op: enum { lt, le, gt, ge, eq, ne }) Vec(L, bool) {
-            const sv = @Vector(L, T);
-            const b: sv = if (comptime isVec(@TypeOf(rhs))) rhs.v else @splat(scalar.cast(T, rhs));
-            return switch (op) {
-                .lt => .{ .v = self.v < b },
-                .le => .{ .v = self.v <= b },
-                .gt => .{ .v = self.v > b },
-                .ge => .{ .v = self.v >= b },
-                .eq => .{ .v = self.v == b },
-                .ne => .{ .v = self.v != b },
+        /// Component-wise comparison backend: applies `comparison` lane-by-lane
+        /// between `self` and `right_hand_side` (a scalar `right_hand_side` is
+        /// broadcast), yielding a bool vector.
+        pub inline fn compare(self: Self, right_hand_side: anytype, comptime comparison: Comparison) Vec(component_count, bool) {
+            const sv = @Vector(component_count, scalar_type);
+            const b: sv = if (comptime isVec(@TypeOf(right_hand_side))) right_hand_side.v else @splat(scalar.cast(scalar_type, right_hand_side));
+            return switch (comparison) {
+                .less_than => .{ .v = self.v < b },
+                .less_than_equal => .{ .v = self.v <= b },
+                .greater_than => .{ .v = self.v > b },
+                .greater_than_equal => .{ .v = self.v >= b },
+                .equal => .{ .v = self.v == b },
+                .not_equal => .{ .v = self.v != b },
             };
         }
 
         /// Component-wise `<` (GLM `lessThan`). Result lane i is true iff
-        /// `self[i] < rhs[i]`; scalar rhs is compared against every lane.
-        pub inline fn lessThan(self: Self, rhs: anytype) Vec(L, bool) {
-            return self.cmp(rhs, .lt);
+        /// `self[i] < right_hand_side[i]`; scalar right_hand_side is compared against every lane.
+        pub inline fn lessThan(self: Self, right_hand_side: anytype) Vec(component_count, bool) {
+            return self.compare(right_hand_side, .less_than);
         }
 
         /// Component-wise `<=` (GLM `lessThanEqual`).
-        pub inline fn lessThanEqual(self: Self, rhs: anytype) Vec(L, bool) {
-            return self.cmp(rhs, .le);
+        pub inline fn lessThanEqual(self: Self, right_hand_side: anytype) Vec(component_count, bool) {
+            return self.compare(right_hand_side, .less_than_equal);
         }
 
         /// Component-wise `>` (GLM `greaterThan`).
-        pub inline fn greaterThan(self: Self, rhs: anytype) Vec(L, bool) {
-            return self.cmp(rhs, .gt);
+        pub inline fn greaterThan(self: Self, right_hand_side: anytype) Vec(component_count, bool) {
+            return self.compare(right_hand_side, .greater_than);
         }
 
         /// Component-wise `>=` (GLM `greaterThanEqual`).
-        pub inline fn greaterThanEqual(self: Self, rhs: anytype) Vec(L, bool) {
-            return self.cmp(rhs, .ge);
+        pub inline fn greaterThanEqual(self: Self, right_hand_side: anytype) Vec(component_count, bool) {
+            return self.compare(right_hand_side, .greater_than_equal);
         }
 
         /// Component-wise `==` (GLM `equal`). Exact bitwise equality on ints;
         /// on floats use `equalEps`/`equalULP` for tolerance comparisons.
-        pub inline fn equal(self: Self, rhs: anytype) Vec(L, bool) {
-            return self.cmp(rhs, .eq);
+        pub inline fn equal(self: Self, right_hand_side: anytype) Vec(component_count, bool) {
+            return self.compare(right_hand_side, .equal);
         }
 
         /// Component-wise `!=` (GLM `notEqual`).
-        pub inline fn notEqual(self: Self, rhs: anytype) Vec(L, bool) {
-            return self.cmp(rhs, .ne);
+        pub inline fn notEqual(self: Self, right_hand_side: anytype) Vec(component_count, bool) {
+            return self.compare(right_hand_side, .not_equal);
         }
 
         // ---- bool-vector reductions ----
@@ -410,7 +422,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// least one lane is true, e.g. `v.lessThan(other).any()`. Compile
         /// error unless the vector's component type is `bool`.
         pub inline fn any(self: Self) bool {
-            if (comptime T != bool) @compileError("any() requires a bool vector");
+            if (comptime scalar_type != bool) @compileError("any() requires a bool vector");
             return @reduce(.Or, self.v);
         }
 
@@ -418,7 +430,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// every lane is true, e.g. `v.greaterThan(bounds).all()` as a
         /// bounds check. Compile error unless the component type is `bool`.
         pub inline fn all(self: Self) bool {
-            if (comptime T != bool) @compileError("all() requires a bool vector");
+            if (comptime scalar_type != bool) @compileError("all() requires a bool vector");
             return @reduce(.And, self.v);
         }
 
@@ -473,16 +485,16 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             return self.apply(scalar.fract);
         }
 
-        /// Component-wise minimum (GLM `min`). `rhs` may be a vector or a
+        /// Component-wise minimum (GLM `min`). `right_hand_side` may be a vector or a
         /// scalar: `pos.clamp(0, size)` takes vectors, `v.max(0)` clamps a
         /// side. NaN handling matches `scalar.min`.
-        pub inline fn min(self: Self, rhs: anytype) Self {
-            return self.apply2(rhs, scalar.min);
+        pub inline fn min(self: Self, right_hand_side: anytype) Self {
+            return self.apply2(right_hand_side, scalar.min);
         }
 
         /// Component-wise maximum (GLM `max`).
-        pub inline fn max(self: Self, rhs: anytype) Self {
-            return self.apply2(rhs, scalar.max);
+        pub inline fn max(self: Self, right_hand_side: anytype) Self {
+            return self.apply2(right_hand_side, scalar.max);
         }
 
         /// Component-wise clamp into [lo, hi] (GLM `clamp`). `lo`/`hi` may
@@ -496,23 +508,23 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             return scalar.clamp(value, min_val, max_val);
         }
 
-        /// Linear interpolation between the receiver and `rhs` by factor `a`
+        /// Linear interpolation between the receiver and `right_hand_side` by factor `a`
         /// (GLM `mix(x, y, a)`, GLSL writes it `mix(x, y, a)` too).
         /// - `a` scalar: uniform blend — `a = 0` returns the receiver, `a = 1`
-        ///   returns `rhs`, outside [0,1] it extrapolates
+        ///   returns `right_hand_side`, outside [0,1] it extrapolates
         ///   (`a.neg().mul(t).add(a.mul(1 - t))` is the GLSL formula),
         /// - `a` vector: per-component factors,
         /// - `a` bool (or bool vector): selects component-wise with no
-        ///   interpolation (`a` true picks `rhs`). Same effect as `if`.
-        pub fn mix(self: Self, rhs: anytype, factor: anytype) Self {
+        ///   interpolation (`a` true picks `right_hand_side`). Same effect as `if`.
+        pub fn mix(self: Self, right_hand_side: anytype, factor: anytype) Self {
             const AT = @TypeOf(factor);
-            if (comptime AT == bool) return if (factor) rhs else self;
-            const RT = @TypeOf(rhs);
+            if (comptime AT == bool) return if (factor) right_hand_side else self;
+            const RT = @TypeOf(right_hand_side);
             const av = comptime isVec(AT);
             const rv = comptime isVec(RT);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
-                const ri = if (rv) rhs.v[i] else rhs;
+            inline for (0..component_count) |i| {
+                const ri = if (rv) right_hand_side.v[i] else right_hand_side;
                 const factor_i = if (av) factor.v[i] else factor;
                 r[i] = scalar.mix(self.v[i], ri, factor_i);
             }
@@ -527,7 +539,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             const ET = @TypeOf(edge);
             const ev = comptime isVec(ET);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
+            inline for (0..component_count) |i| {
                 const ei = if (ev) edge.v[i] else edge;
                 r[i] = scalar.step(ei, self.v[i]);
             }
@@ -541,15 +553,15 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             return self.apply3(edge0, edge1, scalar.smoothstep);
         }
 
-        /// Component-wise fused multiply-add: `self·rhs + c` with a single
-        /// rounding. `rhs`/`c` may be vectors or scalars (both vector → SIMD
+        /// Component-wise fused multiply-add: `self·right_hand_side + c` with a single
+        /// rounding. `right_hand_side`/`c` may be vectors or scalars (both vector → SIMD
         /// `@mulAdd`, mixed → per-lane scalar path).
-        pub inline fn fma(self: Self, rhs: anytype, addend: anytype) Self {
-            const RT = @TypeOf(rhs);
+        pub inline fn fma(self: Self, right_hand_side: anytype, addend: anytype) Self {
+            const RT = @TypeOf(right_hand_side);
             const CT = @TypeOf(addend);
             if (comptime isVec(RT) and isVec(CT))
-                return .{ .v = @mulAdd(storage_type, self.v, rhs.v, addend.v) };
-            return self.apply3(rhs, addend, scalar.fma);
+                return .{ .v = @mulAdd(storage_type, self.v, right_hand_side.v, addend.v) };
+            return self.apply3(right_hand_side, addend, scalar.fma);
         }
 
         /// Split each component into fractional and integral parts
@@ -559,7 +571,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         pub fn modf(self: Self) struct { fract: Self, integral: Self } {
             var fr: storage_type = undefined;
             var it: storage_type = undefined;
-            inline for (0..L) |i| {
+            inline for (0..component_count) |i| {
                 const m = scalar.modf(self.v[i]);
                 fr[i] = m.fract;
                 it[i] = m.integral;
@@ -571,10 +583,10 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// (GLM `frexp`): `x = significand · 2^exponent` with significand in
         /// [0.5, 1). Usually combined with `ldexp` to move a value between
         /// precisions or to serialize it losslessly.
-        pub fn frexp(self: Self) struct { significand: Self, exponent: Vec(L, i32) } {
+        pub fn frexp(self: Self) struct { significand: Self, exponent: Vec(component_count, i32) } {
             var sg: storage_type = undefined;
-            var ex: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| {
+            var ex: @Vector(component_count, i32) = undefined;
+            inline for (0..component_count) |i| {
                 const m = scalar.frexp(self.v[i]);
                 sg[i] = m.significand;
                 ex[i] = m.exponent;
@@ -589,9 +601,9 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             const ET = @TypeOf(exponent);
             var r: storage_type = undefined;
             if (comptime isVec(ET)) {
-                inline for (0..L) |i| r[i] = scalar.ldexp(self.v[i], exponent.v[i]);
+                inline for (0..component_count) |i| r[i] = scalar.ldexp(self.v[i], exponent.v[i]);
             } else {
-                inline for (0..L) |i| r[i] = scalar.ldexp(self.v[i], exponent);
+                inline for (0..component_count) |i| r[i] = scalar.ldexp(self.v[i], exponent);
             }
             return .{ .v = r };
         }
@@ -599,18 +611,18 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Per-component NaN test (GLM `isnan`), resulting in a bool vector.
         /// Useful to validate shader output: `v.sub(prev_v).isNan().any()`
         /// detects NaN infecting an animation variable.
-        pub fn isNan(self: Self) Vec(L, bool) {
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| r[i] = scalar.isNan(self.v[i]);
+        pub fn isNan(self: Self) Vec(component_count, bool) {
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.isNan(self.v[i]);
             return .{ .v = r };
         }
 
         /// Per-component infinity test (GLM `isinf`), resulting in a bool
         /// vector. Detects division-by-zero results from physics steps or
         /// from invalid rotation angles.
-        pub fn isInf(self: Self) Vec(L, bool) {
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| r[i] = scalar.isInf(self.v[i]);
+        pub fn isInf(self: Self) Vec(component_count, bool) {
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.isInf(self.v[i]);
             return .{ .v = r };
         }
 
@@ -662,12 +674,12 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             return self.apply(scalar.atan);
         }
 
-        /// Per-component atan2 (GLM `atan(self, rhs)`, i.e. the receiver is
-        /// the y-axis argument): angle of the polar coordinates (rhs, self),
+        /// Per-component atan2 (GLM `atan(self, right_hand_side)`, i.e. the receiver is
+        /// the y-axis argument): angle of the polar coordinates (right_hand_side, self),
         /// result in [-π, π]. Use to get the heading of a 2D direction:
         /// `dir.y().atan2(dir.x())`.
-        pub inline fn atan2(self: Self, rhs: anytype) Self {
-            return self.apply2(rhs, scalar.atan2);
+        pub inline fn atan2(self: Self, right_hand_side: anytype) Self {
+            return self.apply2(right_hand_side, scalar.atan2);
         }
 
         /// Per-component hyperbolic sine (GLM `sinh`). Use for catenary
@@ -706,11 +718,11 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
 
         // ---- exponential ----
 
-        /// Component-wise power (GLM `pow`): `self[i]^rhs[i]`; `rhs` may be
+        /// Component-wise power (GLM `pow`): `self[i]^right_hand_side[i]`; `right_hand_side` may be
         /// a vector or scalar. See `scalar.pow` for edge-case rules
         /// (negative bases with non-integer exponents give NaN).
-        pub inline fn pow(self: Self, rhs: anytype) Self {
-            return self.apply2(rhs, scalar.pow);
+        pub inline fn pow(self: Self, right_hand_side: anytype) Self {
+            return self.apply2(right_hand_side, scalar.pow);
         }
 
         /// Component-wise natural exponent (GLM `exp`): `e^x`.
@@ -760,8 +772,8 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// vectors the result is the cosine of the angle between them;
         /// `n.dot(d)` with a plane normal answers which side of a plane a
         /// direction is on (see `faceforward`).
-        pub inline fn dot(self: Self, rhs: Self) T {
-            return @reduce(.Add, self.v * rhs.v);
+        pub inline fn dot(self: Self, right_hand_side: Self) scalar_type {
+            return @reduce(.Add, self.v * right_hand_side.v);
         }
 
         /// Euclidean length `√(x·x)` (GLM `length`). Computed in the
@@ -776,20 +788,20 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Distance between two points (GLM `distance`): `(a - b).length()`.
         /// For comparing distances prefer `lengthSquared`-style checks
         /// (`a.sub(b).dot(a.sub(b))`) when the square root can be avoided.
-        pub inline fn distance(self: Self, rhs: Self) float_type {
-            return self.sub(rhs).length();
+        pub inline fn distance(self: Self, right_hand_side: Self) float_type {
+            return self.sub(right_hand_side).length();
         }
 
         /// Cross product, 3D only (GLM `cross`): a vector perpendicular to
         /// both operands whose length equals the parallelogram area. Handed
         /// right-handed, matching GLM; aggregate into `mat4`-style rotation
         /// bases with `normalize`.
-        pub fn cross(self: Self, rhs: Self) Self {
-            if (comptime L != 3) @compileError("cross is only defined for 3-component vectors");
-            return .{ .v = @Vector(3, T){
-                self.v[1] * rhs.v[2] - self.v[2] * rhs.v[1],
-                self.v[2] * rhs.v[0] - self.v[0] * rhs.v[2],
-                self.v[0] * rhs.v[1] - self.v[1] * rhs.v[0],
+        pub fn cross(self: Self, right_hand_side: Self) Self {
+            if (comptime component_count != 3) @compileError("cross is only defined for 3-component vectors");
+            return .{ .v = @Vector(3, scalar_type){
+                self.v[1] * right_hand_side.v[2] - self.v[2] * right_hand_side.v[1],
+                self.v[2] * right_hand_side.v[0] - self.v[0] * right_hand_side.v[2],
+                self.v[0] * right_hand_side.v[1] - self.v[1] * right_hand_side.v[0],
             } };
         }
 
@@ -797,14 +809,14 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `v / |v|`. Zero vectors stay zero; returns a float vector even
         /// for int inputs. Use on directions before `dot`/`cross` so that
         /// angle computations behave like on unit spheres.
-        pub fn normalize(self: Self) Vec(L, float_type) {
+        pub fn normalize(self: Self) Vec(component_count, float_type) {
             const d = @reduce(.Add, self.v * self.v);
             const is: float_type = scalar.inversesqrt(scalar.cast(float_type, d));
-            const c: @Vector(L, float_type) = if (T == float_type)
+            const c: @Vector(component_count, float_type) = if (scalar_type == float_type)
                 self.v
             else
                 @floatCast(self.v);
-            return .{ .v = c * @as(@Vector(L, float_type), @splat(is)) };
+            return .{ .v = c * @as(@Vector(component_count, float_type), @splat(is)) };
         }
 
         /// Orient a normal `self` away from a reference direction (GLM
@@ -819,7 +831,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `reflect(I, N)`): `I - 2·(I·N)·N`. `n` should be normalized;
         /// result is the mirror of `self` across the plane with normal `n`.
         pub inline fn reflect(self: Self, normal: Self) Self {
-            return self.sub(normal.mul(self.dot(normal)).mul(@as(T, 2)));
+            return self.sub(normal.mul(self.dot(normal)).mul(@as(scalar_type, 2)));
         }
 
         /// Refract an incident vector `self` at a surface with normal `n`
@@ -828,9 +840,9 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// internal reflection occurs (k < 0). Handy for simulating glass
         /// or water rays without a full ray tracer.
         pub fn refract(self: Self, normal: Self, index_ratio: anytype) Self {
-            const ratio: T = scalar.cast(T, index_ratio);
+            const ratio: scalar_type = scalar.cast(scalar_type, index_ratio);
             const dot_value = self.dot(normal);
-            const k = @as(T, 1) - ratio * ratio * (@as(T, 1) - dot_value * dot_value);
+            const k = @as(scalar_type, 1) - ratio * ratio * (@as(scalar_type, 1) - dot_value * dot_value);
             if (k < 0) return Self.zero();
             return self.mul(ratio).sub(normal.mul(scalar.sqrt(k) + ratio * dot_value));
         }
@@ -840,27 +852,27 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Per-component popcount (GLM `bitCount`): number of set bits in
         /// each lane. Result is i32 per GLM's `bitCount(vec)` overloads;
         /// handy for parity checks and bit-packed grid neighbors.
-        pub inline fn bitCount(self: Self) Vec(L, i32) {
-            var r: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.bitCount(self.v[i]);
+        pub inline fn bitCount(self: Self) Vec(component_count, i32) {
+            var r: @Vector(component_count, i32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.bitCount(self.v[i]);
             return .{ .v = r };
         }
 
         /// Per-component index of the least significant set bit (GLM
         /// `findLSB`), or -1 for a zero lane. Use to decompose a bitmask
         /// into indices.
-        pub inline fn findLSB(self: Self) Vec(L, i32) {
-            var r: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.findLSB(self.v[i]);
+        pub inline fn findLSB(self: Self) Vec(component_count, i32) {
+            var r: @Vector(component_count, i32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.findLSB(self.v[i]);
             return .{ .v = r };
         }
 
         /// Per-component index of the most significant set bit (GLM
         /// `findMSB`), or -1 for zero. On signed values the sign bit is
         /// interpreted as the MSB, so `findMSB` on -1 yields the top bit.
-        pub inline fn findMSB(self: Self) Vec(L, i32) {
-            var r: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.findMSB(self.v[i]);
+        pub inline fn findMSB(self: Self) Vec(component_count, i32) {
+            var r: @Vector(component_count, i32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.findMSB(self.v[i]);
             return .{ .v = r };
         }
 
@@ -870,9 +882,9 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         pub inline fn bitfieldExtract(self: Self, offset: anytype, bits: anytype) Self {
             var r: storage_type = undefined;
             if (comptime isVec(@TypeOf(offset))) {
-                inline for (0..L) |i| r[i] = scalar.bitfieldExtract(self.v[i], offset.v[i], bits.v[i]);
+                inline for (0..component_count) |i| r[i] = scalar.bitfieldExtract(self.v[i], offset.v[i], bits.v[i]);
             } else {
-                inline for (0..L) |i| r[i] = scalar.bitfieldExtract(self.v[i], offset, bits);
+                inline for (0..component_count) |i| r[i] = scalar.bitfieldExtract(self.v[i], offset, bits);
             }
             return .{ .v = r };
         }
@@ -883,7 +895,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `bitfieldExtract` for the same offset/bits.
         pub inline fn bitfieldInsert(self: Self, insert: anytype, offset: anytype, bits: anytype) Self {
             var r: storage_type = undefined;
-            inline for (0..L) |i| r[i] = scalar.bitfieldInsert(
+            inline for (0..component_count) |i| r[i] = scalar.bitfieldInsert(
                 self.v[i],
                 if (comptime isVec(@TypeOf(insert))) insert.v[i] else insert,
                 if (comptime isVec(@TypeOf(offset))) offset.v[i] else offset,
@@ -903,13 +915,13 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `uaddCarry`): `sum = x + y` modulo 2^bits, `carry` is 1 where
         /// the addition overflowed. Enables multi-precision arithmetic,
         /// e.g. a 128-bit accumulator in 4 lanes.
-        pub fn uaddCarry(self: Self, rhs: Self) struct { sum: Self, carry: Self } {
+        pub fn uaddCarry(self: Self, right_hand_side: Self) struct { sum: Self, carry: Self } {
             var s: storage_type = undefined;
             var c: storage_type = undefined;
-            inline for (0..L) |i| {
-                const r = @addWithOverflow(self.v[i], rhs.v[i]);
+            inline for (0..component_count) |i| {
+                const r = @addWithOverflow(self.v[i], right_hand_side.v[i]);
                 s[i] = r[0];
-                c[i] = if (r[1]) scalar.cast(T, 1) else scalar.cast(T, 0);
+                c[i] = if (r[1]) scalar.cast(scalar_type, 1) else scalar.cast(scalar_type, 0);
             }
             return .{ .sum = .{ .v = s }, .carry = .{ .v = c } };
         }
@@ -918,13 +930,13 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `usubBorrow`): `diff = x - y` modulo 2^bits, `borrow` is 1
         /// where the subtraction underflowed. The unsigned twin of
         /// `uaddCarry`.
-        pub fn usubBorrow(self: Self, rhs: Self) struct { diff: Self, borrow: Self } {
+        pub fn usubBorrow(self: Self, right_hand_side: Self) struct { diff: Self, borrow: Self } {
             var d: storage_type = undefined;
             var b: storage_type = undefined;
-            inline for (0..L) |i| {
-                const r = @subWithOverflow(self.v[i], rhs.v[i]);
+            inline for (0..component_count) |i| {
+                const r = @subWithOverflow(self.v[i], right_hand_side.v[i]);
                 d[i] = r[0];
-                b[i] = if (r[1]) scalar.cast(T, 1) else scalar.cast(T, 0);
+                b[i] = if (r[1]) scalar.cast(scalar_type, 1) else scalar.cast(scalar_type, 0);
             }
             return .{ .diff = .{ .v = d }, .borrow = .{ .v = b } };
         }
@@ -934,35 +946,35 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Component-wise NaN-safe minimum (GLM `fmin`): unlike `min`, a NaN
         /// operand is ignored, so `fmin` with a sentinel NaN "clamps" a
         /// value into a valid range: `v.fmin(valid_limit)`.
-        pub inline fn fmin(self: Self, rhs: anytype) Self {
-            return self.apply2(rhs, scalar.fmin);
+        pub inline fn fmin(self: Self, right_hand_side: anytype) Self {
+            return self.apply2(right_hand_side, scalar.fmin);
         }
 
         /// Three-way NaN-safe minimum (GLM `fmin(x, y, z)`).
-        pub inline fn fmin3(self: Self, rhs: anytype, rhs2: anytype) Self {
-            return self.apply3(rhs, rhs2, scalar.fmin3);
+        pub inline fn fmin3(self: Self, right_hand_side: anytype, right_hand_side_2: anytype) Self {
+            return self.apply3(right_hand_side, right_hand_side_2, scalar.fmin3);
         }
 
         /// Four-way NaN-safe minimum (GLM `fmin(x, y, z, w)`).
-        pub inline fn fmin4(self: Self, rhs: anytype, rhs2: anytype, rhs3: anytype) Self {
-            return self.fmin3(rhs, rhs2).fmin(rhs3);
+        pub inline fn fmin4(self: Self, right_hand_side: anytype, right_hand_side_2: anytype, right_hand_side_3: anytype) Self {
+            return self.fmin3(right_hand_side, right_hand_side_2).fmin(right_hand_side_3);
         }
 
         /// Component-wise NaN-safe maximum (GLM `fmax`): NaN operands are
         /// ignored, so `fmax` with a NaN removes bad lanes from simulation
         /// data instead of poisoning it (unlike `max`).
-        pub inline fn fmax(self: Self, rhs: anytype) Self {
-            return self.apply2(rhs, scalar.fmax);
+        pub inline fn fmax(self: Self, right_hand_side: anytype) Self {
+            return self.apply2(right_hand_side, scalar.fmax);
         }
 
         /// Three-way NaN-safe maximum (GLM `fmax(x, y, z)`).
-        pub inline fn fmax3(self: Self, rhs: anytype, rhs2: anytype) Self {
-            return self.apply3(rhs, rhs2, scalar.fmax3);
+        pub inline fn fmax3(self: Self, right_hand_side: anytype, right_hand_side_2: anytype) Self {
+            return self.apply3(right_hand_side, right_hand_side_2, scalar.fmax3);
         }
 
         /// Four-way NaN-safe maximum (GLM `fmax(x, y, z, w)`).
-        pub inline fn fmax4(self: Self, rhs: anytype, rhs2: anytype, rhs3: anytype) Self {
-            return self.fmax3(rhs, rhs2).fmax(rhs3);
+        pub inline fn fmax4(self: Self, right_hand_side: anytype, right_hand_side_2: anytype, right_hand_side_3: anytype) Self {
+            return self.fmax3(right_hand_side, right_hand_side_2).fmax(right_hand_side_3);
         }
 
         /// Component-wise clamp that ignores NaN (GLM `fclamp(x, lo, hi)`):
@@ -998,47 +1010,47 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// derivative at the fold (unlike `fract`).
         pub fn mirrorRepeat(self: Self) Self {
             var r: storage_type = undefined;
-            inline for (0..L) |i| r[i] = scalar.mirrorRepeat(self.v[i]);
+            inline for (0..component_count) |i| r[i] = scalar.mirrorRepeat(self.v[i]);
             return .{ .v = r };
         }
 
         /// Round away from zero, returning an i32 vector (GLM `iround`, 1.1
         /// addition). Use when a float must become an array index or pixel
         /// coordinate.
-        pub inline fn iround(self: Self) Vec(L, i32) {
-            var r: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.iround(self.v[i]);
+        pub inline fn iround(self: Self) Vec(component_count, i32) {
+            var r: @Vector(component_count, i32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.iround(self.v[i]);
             return .{ .v = r };
         }
 
         /// Round away from zero, returning a u32 vector (GLM `uround`, 1.1
         /// addition); negative results wrap into the unsigned domain via
         /// float→uint cast semantics, so prefer `iround` for positions.
-        pub inline fn uround(self: Self) Vec(L, u32) {
-            var r: @Vector(L, u32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.uround(self.v[i]);
+        pub inline fn uround(self: Self) Vec(component_count, u32) {
+            var r: @Vector(component_count, u32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.uround(self.v[i]);
             return .{ .v = r };
         }
 
         /// Three-way component-wise minimum (GLM `min(x, y, z)`); thriftier
         /// than chaining two `min` calls into temporaries.
-        pub inline fn min3(self: Self, rhs: Self, rhs2: Self) Self {
-            return self.min(rhs).min(rhs2);
+        pub inline fn min3(self: Self, right_hand_side: Self, right_hand_side_2: Self) Self {
+            return self.min(right_hand_side).min(right_hand_side_2);
         }
 
         /// Four-way component-wise minimum (GLM `min(x, y, z, w)`).
-        pub inline fn min4(self: Self, rhs: Self, rhs2: Self, rhs3: Self) Self {
-            return self.min(rhs).min(rhs2).min(rhs3);
+        pub inline fn min4(self: Self, right_hand_side: Self, right_hand_side_2: Self, right_hand_side_3: Self) Self {
+            return self.min(right_hand_side).min(right_hand_side_2).min(right_hand_side_3);
         }
 
         /// Three-way component-wise maximum (GLM `max(x, y, z)`).
-        pub inline fn max3(self: Self, rhs: Self, rhs2: Self) Self {
-            return self.max(rhs).max(rhs2);
+        pub inline fn max3(self: Self, right_hand_side: Self, right_hand_side_2: Self) Self {
+            return self.max(right_hand_side).max(right_hand_side_2);
         }
 
         /// Four-way component-wise maximum (GLM `max(x, y, z, w)`).
-        pub inline fn max4(self: Self, rhs: Self, rhs2: Self, rhs3: Self) Self {
-            return self.max(rhs).max(rhs2).max(rhs3);
+        pub inline fn max4(self: Self, right_hand_side: Self, right_hand_side_2: Self, right_hand_side_3: Self) Self {
+            return self.max(right_hand_side).max(right_hand_side_2).max(right_hand_side_3);
         }
 
         // ---- ext/vector_reciprocal ----
@@ -1119,24 +1131,24 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// (GLM `equalEps(x, y, eps)`): lane true iff `|x − y| < eps`.
         /// `eps` may be a vector or scalar. Use instead of `==` on float
         /// data — integration results are rarely bit-exact.
-        pub fn equalEps(self: Self, rhs: anytype, epsilon: anytype) Vec(L, bool) {
+        pub fn equalEps(self: Self, right_hand_side: anytype, epsilon: anytype) Vec(component_count, bool) {
             const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| {
-                r[i] = scalar.equalEps(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| {
+                r[i] = scalar.equalEps(self.v[i], right_hand_side.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
 
         /// Per-component negation of `equalEps` (GLM
         /// `notEqualEps(x, y, eps)`): lane true iff `|x − y| ≥ eps`.
-        pub fn notEqualEps(self: Self, rhs: anytype, epsilon: anytype) Vec(L, bool) {
+        pub fn notEqualEps(self: Self, right_hand_side: anytype, epsilon: anytype) Vec(component_count, bool) {
             const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| {
-                r[i] = scalar.notEqualEps(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| {
+                r[i] = scalar.notEqualEps(self.v[i], right_hand_side.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
@@ -1146,24 +1158,24 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// behavior matches `equalEps` — an absolute comparison against
         /// `eps` with user-controlled magnitude (GLM defaults to 0.1 for
         /// floats).
-        pub fn epsilonEqual(self: Self, rhs: Self, epsilon: anytype) Vec(L, bool) {
+        pub fn epsilonEqual(self: Self, right_hand_side: Self, epsilon: anytype) Vec(component_count, bool) {
             const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| {
-                r[i] = scalar.epsilonEqual(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| {
+                r[i] = scalar.epsilonEqual(self.v[i], right_hand_side.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
 
         /// Per-component `|x − y| ≥ eps` (GLM `epsilonNotEqual`); the
         /// negation of `epsilonEqual`.
-        pub fn epsilonNotEqual(self: Self, rhs: Self, epsilon: anytype) Vec(L, bool) {
+        pub fn epsilonNotEqual(self: Self, right_hand_side: Self, epsilon: anytype) Vec(component_count, bool) {
             const ET = @TypeOf(epsilon);
             const ev = comptime isVec(ET);
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| {
-                r[i] = scalar.epsilonNotEqual(self.v[i], rhs.v[i], if (ev) epsilon.v[i] else epsilon);
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| {
+                r[i] = scalar.epsilonNotEqual(self.v[i], right_hand_side.v[i], if (ev) epsilon.v[i] else epsilon);
             }
             return .{ .v = r };
         }
@@ -1173,16 +1185,16 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `max_ulps` ULPs, treating transcendental results as equal even
         /// when they are not bit-identical. Unlike absolute epsilons this
         /// stays meaningful across exponent scales (1e-20 and 1e20).
-        pub fn equalULP(self: Self, rhs: Self, max_ulps: anytype) Vec(L, bool) {
+        pub fn equalULP(self: Self, right_hand_side: Self, max_ulps: anytype) Vec(component_count, bool) {
             const UT = @TypeOf(max_ulps);
             const uv = comptime isVec(UT);
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| {
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| {
                 const u: i32 = if (uv) max_ulps.v[i] else max_ulps;
                 const T2 = @TypeOf(self.v[i]);
                 if (T2 == f64) {
                     const a: i64 = @bitCast(self.v[i]);
-                    const b: i64 = @bitCast(rhs.v[i]);
+                    const b: i64 = @bitCast(right_hand_side.v[i]);
                     if ((a < 0) != (b < 0)) {
                         const mant_a = a & ((@as(i64, 1) << 52) - 1);
                         const mant_b = b & ((@as(i64, 1) << 52) - 1);
@@ -1194,7 +1206,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
                     }
                 } else {
                     const a: i32 = @bitCast(@as(f32, self.v[i]));
-                    const b: i32 = @bitCast(@as(f32, rhs.v[i]));
+                    const b: i32 = @bitCast(@as(f32, right_hand_side.v[i]));
                     if ((a < 0) != (b < 0)) {
                         const mant_a = a & ((@as(i32, 1) << 23) - 1);
                         const mant_b = b & ((@as(i32, 1) << 23) - 1);
@@ -1211,18 +1223,18 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
 
         /// Per-component negation of `equalULP`: lane true iff the two
         /// floats are more than `max_ulps` ULPs apart.
-        pub fn notEqualULP(self: Self, rhs: Self, max_ulps: anytype) Vec(L, bool) {
-            const e = self.equalULP(rhs, max_ulps);
+        pub fn notEqualULP(self: Self, right_hand_side: Self, max_ulps: anytype) Vec(component_count, bool) {
+            const e = self.equalULP(right_hand_side, max_ulps);
             return e.not_();
         }
 
         /// Component-wise logical NOT on a bool vector (GLM `not_`):
         /// flips every lane. Combined with the relational methods it forms
-        /// the building block for masks: `v.notEqual(rhs).not_().any()`.
-        pub fn not_(self: Self) Vec(L, bool) {
-            if (comptime T != bool) @compileError("not_() requires a bool vector");
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| r[i] = !self.v[i];
+        /// the building block for masks: `v.notEqual(right_hand_side).not_().any()`.
+        pub fn not_(self: Self) Vec(component_count, bool) {
+            if (comptime scalar_type != bool) @compileError("not_() requires a bool vector");
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| r[i] = !self.v[i];
             return .{ .v = r };
         }
 
@@ -1246,11 +1258,11 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
 
         /// Per-component count of representable floats strictly between the
         /// two operands (GLM `floatDistance`, 1.1 addition), signed by the
-        /// direction from `self` toward `rhs` and returned as i64. This is
+        /// direction from `self` toward `right_hand_side` and returned as i64. This is
         /// the exact "distance in ULPs" that `equalULP` approximates.
-        pub inline fn floatDistance(self: Self, rhs: Self) Vec(L, i64) {
-            var r: @Vector(L, i64) = undefined;
-            inline for (0..L) |i| r[i] = scalar.floatDistance(self.v[i], rhs.v[i]);
+        pub inline fn floatDistance(self: Self, right_hand_side: Self) Vec(component_count, i64) {
+            var r: @Vector(component_count, i64) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.floatDistance(self.v[i], right_hand_side.v[i]);
             return .{ .v = r };
         }
 
@@ -1261,34 +1273,34 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// comparisons, hashing, or packing into integers — the bit pattern
         /// of a float is preserved, including NaN payloads, and the result
         /// for -0.0 differs from +0.0 (`0x80000000` vs `0x00000000`).
-        pub inline fn floatBitsToInt(self: Self) Vec(L, i32) {
-            var r: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.floatBitsToInt(@floatCast(self.v[i]));
+        pub inline fn floatBitsToInt(self: Self) Vec(component_count, i32) {
+            var r: @Vector(component_count, i32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.floatBitsToInt(@floatCast(self.v[i]));
             return .{ .v = r };
         }
 
         /// Reinterpret the float bits of each lane as a u32 (GLM
         /// `floatBitsToUint`). The unsigned twin of `floatBitsToInt`.
-        pub inline fn floatBitsToUint(self: Self) Vec(L, u32) {
-            var r: @Vector(L, u32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.floatBitsToUint(@floatCast(self.v[i]));
+        pub inline fn floatBitsToUint(self: Self) Vec(component_count, u32) {
+            var r: @Vector(component_count, u32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.floatBitsToUint(@floatCast(self.v[i]));
             return .{ .v = r };
         }
 
         /// Reinterpret i32 bits as f32 (GLM `intBitsToFloat`); the inverse
         /// of `floatBitsToInt`. Use to decode float data that was stored in
         /// integer storage, or to construct floats from raw IEEE patterns.
-        pub inline fn intBitsToFloat(self: Self) Vec(L, f32) {
-            var r: @Vector(L, f32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.intBitsToFloat(self.v[i]);
+        pub inline fn intBitsToFloat(self: Self) Vec(component_count, f32) {
+            var r: @Vector(component_count, f32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.intBitsToFloat(self.v[i]);
             return .{ .v = r };
         }
 
         /// Reinterpret u32 bits as f32 (GLM `uintBitsToFloat`); the inverse
         /// of `floatBitsToUint`.
-        pub inline fn uintBitsToFloat(self: Self) Vec(L, f32) {
-            var r: @Vector(L, f32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.uintBitsToFloat(self.v[i]);
+        pub inline fn uintBitsToFloat(self: Self) Vec(component_count, f32) {
+            var r: @Vector(component_count, f32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.uintBitsToFloat(self.v[i]);
             return .{ .v = r };
         }
 
@@ -1298,9 +1310,9 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `isPowerOfTwo`): lane true iff the integer has exactly one set
         /// bit. Useful after `floorPowerOfTwo` to detect that an allocation
         /// or atlas size is already a valid power of two.
-        pub inline fn isPowerOfTwo(self: Self) Vec(L, bool) {
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| r[i] = scalar.isPowerOfTwo(self.v[i]);
+        pub inline fn isPowerOfTwo(self: Self) Vec(component_count, bool) {
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.isPowerOfTwo(self.v[i]);
             return .{ .v = r };
         }
 
@@ -1308,11 +1320,11 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `isMultiple`): lane true iff `x mod m == 0`. Handles signed
         /// operands by comparing absolute values, so `isMultiple(-8, 4)`
         /// is also true, while 0 is a multiple of anything.
-        pub inline fn isMultiple(self: Self, multiple: anytype) Vec(L, bool) {
+        pub inline fn isMultiple(self: Self, multiple: anytype) Vec(component_count, bool) {
             const MT = @TypeOf(multiple);
             const mv = comptime isVec(MT);
-            var r: @Vector(L, bool) = undefined;
-            inline for (0..L) |i| {
+            var r: @Vector(component_count, bool) = undefined;
+            inline for (0..component_count) |i| {
                 r[i] = scalar.isMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
@@ -1326,7 +1338,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             const MT = @TypeOf(multiple);
             const mv = comptime isVec(MT);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
+            inline for (0..component_count) |i| {
                 r[i] = scalar.nextMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
@@ -1338,7 +1350,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             const MT = @TypeOf(multiple);
             const mv = comptime isVec(MT);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
+            inline for (0..component_count) |i| {
                 r[i] = scalar.prevMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
@@ -1352,7 +1364,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             const MT = @TypeOf(multiple);
             const mv = comptime isVec(MT);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
+            inline for (0..component_count) |i| {
                 r[i] = scalar.ceilMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
@@ -1365,7 +1377,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             const MT = @TypeOf(multiple);
             const mv = comptime isVec(MT);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
+            inline for (0..component_count) |i| {
                 r[i] = scalar.floorMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
@@ -1377,7 +1389,7 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             const MT = @TypeOf(multiple);
             const mv = comptime isVec(MT);
             var r: storage_type = undefined;
-            inline for (0..L) |i| {
+            inline for (0..component_count) |i| {
                 r[i] = scalar.roundMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
@@ -1420,9 +1432,9 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// `count` consecutive set bits (GLM `findNSB`), or -1 when no such
         /// run fits. Use for slot allocators: with `count` = freelist size
         /// it finds the first spot that can host a run.
-        pub fn findNSB(self: Self, significant_bit_count: anytype) Vec(L, i32) {
-            var r: @Vector(L, i32) = undefined;
-            inline for (0..L) |i| r[i] = scalar.findNSB(self.v[i], significant_bit_count);
+        pub fn findNSB(self: Self, significant_bit_count: anytype) Vec(component_count, i32) {
+            var r: @Vector(component_count, i32) = undefined;
+            inline for (0..component_count) |i| r[i] = scalar.findNSB(self.v[i], significant_bit_count);
             return .{ .v = r };
         }
 
@@ -1431,25 +1443,25 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
         /// Sum of all components (GLM `compAdd`, GLSL `compAdd`): a scalar.
         /// For dot products use `dot`, which is the same without the extra
         /// allocation.
-        pub inline fn compAdd(self: Self) T {
+        pub inline fn compAdd(self: Self) scalar_type {
             return @reduce(.Add, self.v);
         }
 
         /// Product of all components (GLM `compMul`): `x*y*z*w`. Zero in
         /// any lane zeroes the result — check before dividing by it.
-        pub inline fn compMul(self: Self) T {
+        pub inline fn compMul(self: Self) scalar_type {
             return @reduce(.Mul, self.v);
         }
 
         /// Minimum of all components (GLM `compMin`). Useful to find the
         /// tightest bounding extent of a vector set.
-        pub inline fn compMin(self: Self) T {
+        pub inline fn compMin(self: Self) scalar_type {
             return @reduce(.Min, self.v);
         }
 
         /// Maximum of all components (GLM `compMax`). With `compMin` this
         /// brackets a value set like an AABB.
-        pub inline fn compMax(self: Self) T {
+        pub inline fn compMax(self: Self) scalar_type {
             return @reduce(.Max, self.v);
         }
 
@@ -1463,9 +1475,9 @@ pub fn Vec(comptime L: usize, comptime T: type) type {
             _ = fmt;
             _ = options;
             try writer.writeByte('{');
-            for (0..L) |i| {
+            for (0..component_count) |i| {
                 if (i != 0) try writer.writeByte(',');
-                if (comptime T == bool)
+                if (comptime scalar_type == bool)
                     try writer.print("{}", .{self.v[i]})
                 else
                     try writer.print("{d}", .{self.v[i]});

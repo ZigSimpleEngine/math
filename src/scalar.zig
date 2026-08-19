@@ -9,26 +9,26 @@
 
 const std = @import("std");
 
-/// Returns `true` if `T` is a floating-point type (f16/f32/f64/f80/f128).
+/// Returns `true` if `scalar_type` is a floating-point type (f16/f32/f64/f80/f128).
 /// Use in comptime conditionals to dispatch float vs integer behavior.
-pub fn isFloat(comptime T: type) bool {
-    return @typeInfo(T) == .float;
+pub fn isFloat(comptime scalar_type: type) bool {
+    return @typeInfo(scalar_type) == .float;
 }
 
-/// Returns `true` if `T` is a signed or unsigned integer type.
-pub fn isInt(comptime T: type) bool {
-    return @typeInfo(T) == .int;
+/// Returns `true` if `scalar_type` is a signed or unsigned integer type.
+pub fn isInt(comptime scalar_type: type) bool {
+    return @typeInfo(scalar_type) == .int;
 }
 
-/// Returns `true` if `T` is a *signed* integer type.
-pub fn isSigned(comptime T: type) bool {
-    return isInt(T) and @typeInfo(T).int.signedness == .signed;
+/// Returns `true` if `scalar_type` is a *signed* integer type.
+pub fn isSigned(comptime scalar_type: type) bool {
+    return isInt(scalar_type) and @typeInfo(scalar_type).int.signedness == .signed;
 }
 
-/// Returns `true` if `T` can be passed to the arithmetic functions here:
+/// Returns `true` if `scalar_type` can be passed to the arithmetic functions here:
 /// comptime literals, integers, floats and bools.
-pub fn isNumber(comptime T: type) bool {
-    return switch (@typeInfo(T)) {
+pub fn isNumber(comptime scalar_type: type) bool {
+    return switch (@typeInfo(scalar_type)) {
         .comptime_int, .comptime_float, .int, .float, .bool => true,
         else => false,
     };
@@ -38,47 +38,47 @@ pub fn isNumber(comptime T: type) bool {
 /// `f64` and `f16` map to themselves, everything else (including comptime
 /// floats and integers) maps to `f32`. Use it when a function must pick a
 /// concrete float storage type regardless of the input literal.
-pub fn floatType(comptime T: type) type {
-    return if (T == f64 or T == f16) T else f32;
+pub fn floatType(comptime scalar_type: type) type {
+    return if (scalar_type == f64 or scalar_type == f16) scalar_type else f32;
 }
 
 /// Runtime equivalent of a comptime numeric type: `comptime_int` and
 /// `comptime_float` become `f32` (GLM's default `float`), everything else
 /// stays unchanged. Most return types in this module are computed with it.
-pub fn rtType(comptime T: type) type {
-    return switch (@typeInfo(T)) {
+pub fn rtType(comptime scalar_type: type) type {
+    return switch (@typeInfo(scalar_type)) {
         .comptime_int, .comptime_float => f32,
-        else => T,
+        else => scalar_type,
     };
 }
 
-/// Convert `x` to `T` following C++ implicit-conversion rules: bool <-> int
+/// Convert `x` to `scalar_type` following C++ implicit-conversion rules: bool <-> int
 /// <-> float round-trips, floats narrow to integers by truncation, comptime
-/// values convert at compile time. Use `scalar.cast(T, v)` wherever the GLM
+/// values convert at compile time. Use `scalar.cast(scalar_type, v)` wherever the GLM
 /// reference relies on an implicit conversion of a literal or variable.
-pub fn cast(comptime T: type, value: anytype) T {
+pub fn cast(comptime scalar_type: type, value: anytype) scalar_type {
     const U = @TypeOf(value);
-    if (U == T) return value;
+    if (U == scalar_type) return value;
     return switch (@typeInfo(U)) {
-        .comptime_int, .comptime_float => if (T == bool) value != 0 else @as(T, value),
-        .int => switch (@typeInfo(T)) {
+        .comptime_int, .comptime_float => if (scalar_type == bool) value != 0 else @as(scalar_type, value),
+        .int => switch (@typeInfo(scalar_type)) {
             .bool => value != 0,
             .int => @intCast(value),
             .float => @floatFromInt(value),
-            else => @compileError("cannot cast integer to " ++ @typeName(T)),
+            else => @compileError("cannot cast integer to " ++ @typeName(scalar_type)),
         },
-        .float => switch (@typeInfo(T)) {
+        .float => switch (@typeInfo(scalar_type)) {
             .bool => value != 0,
             .float => @floatCast(value),
             .int => @intFromFloat(@trunc(value)),
-            else => @compileError("cannot cast float to " ++ @typeName(T)),
+            else => @compileError("cannot cast float to " ++ @typeName(scalar_type)),
         },
-        .bool => switch (@typeInfo(T)) {
+        .bool => switch (@typeInfo(scalar_type)) {
             .bool => value,
             .int => @intFromBool(value),
-            else => @compileError("cannot cast bool to " ++ @typeName(T)),
+            else => @compileError("cannot cast bool to " ++ @typeName(scalar_type)),
         },
-        else => @compileError("cannot cast " ++ @typeName(U) ++ " to " ++ @typeName(T)),
+        else => @compileError("cannot cast " ++ @typeName(U) ++ " to " ++ @typeName(scalar_type)),
     };
 }
 
@@ -88,22 +88,22 @@ pub fn cast(comptime T: type, value: anytype) T {
 /// the manual `(x < 0 ? -x : x)` form instead of `@abs` to work around a
 /// Zig 0.16 bug with `@abs` on function parameters.
 pub fn abs(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
-    return switch (@typeInfo(T)) {
+    const scalar_type = @TypeOf(value);
+    return switch (@typeInfo(scalar_type)) {
         .comptime_int, .comptime_float => @abs(value),
         .float => @abs(value),
         // @abs on function parameters is broken in Zig 0.16.0; manual form matches GLM.
-        .int => if (comptime isSigned(T)) (if (value < 0) -%value else value) else value,
-        else => @compileError("abs: unsupported type " ++ @typeName(T)),
+        .int => if (comptime isSigned(scalar_type)) (if (value < 0) -%value else value) else value,
+        else => @compileError("abs: unsupported type " ++ @typeName(scalar_type)),
     };
 }
 
 /// Sign of `x`: `-1` if negative, `+1` if positive, `0` if zero. Use to
 /// extract a direction from a signed value, e.g. `sign(velocity)`.
 pub fn sign(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
-    const zero: T = 0;
-    return @as(T, @intFromBool(value > zero)) - @as(T, @intFromBool(value < zero));
+    const scalar_type = @TypeOf(value);
+    const zero: scalar_type = 0;
+    return @as(scalar_type, @intFromBool(value > zero)) - @as(scalar_type, @intFromBool(value < zero));
 }
 
 /// Largest integer not greater than `x` — rounds toward -inf.
@@ -128,18 +128,18 @@ pub fn round(value: anytype) @TypeOf(value) {
 /// integer (GLSL `roundEven`). Unlike `round` this has no directional bias,
 /// so it is the right choice for repeated accumulation/quantization.
 pub fn roundEven(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
+    const scalar_type = @TypeOf(value);
     const integer: i32 = @intFromFloat(@trunc(value));
-    const integer_part: T = @floatFromInt(integer);
+    const integer_part: scalar_type = @floatFromInt(integer);
     const fractional_part = fract(value);
-    if (fractional_part > @as(T, 0.5) or fractional_part < @as(T, 0.5)) {
+    if (fractional_part > @as(scalar_type, 0.5) or fractional_part < @as(scalar_type, 0.5)) {
         return round(value);
     } else if (@mod(integer, 2) == 0) {
         return integer_part;
-    } else if (value <= @as(T, 0)) {
-        return integer_part - @as(T, 1);
+    } else if (value <= @as(scalar_type, 0)) {
+        return integer_part - @as(scalar_type, 1);
     } else {
-        return integer_part + @as(T, 1);
+        return integer_part + @as(scalar_type, 1);
     }
 }
 
@@ -165,14 +165,14 @@ pub fn mod(dividend: anytype, divisor: anytype) @TypeOf(dividend, divisor) {
 
 /// Smaller of `x` and `y`. NaN propagates (returns NaN) — use `fmin` when
 /// NaN values should be ignored instead of poisoning the result.
-pub fn min(lhs: anytype, rhs: anytype) @TypeOf(lhs, rhs) {
-    return if (rhs < lhs) rhs else lhs;
+pub fn min(left_hand_side: anytype, right_hand_side: anytype) @TypeOf(left_hand_side, right_hand_side) {
+    return if (right_hand_side < left_hand_side) right_hand_side else left_hand_side;
 }
 
 /// Larger of `x` and `y`. NaN propagates — use `fmax` when NaNs should be
 /// ignored.
-pub fn max(lhs: anytype, rhs: anytype) @TypeOf(lhs, rhs) {
-    return if (lhs < rhs) rhs else lhs;
+pub fn max(left_hand_side: anytype, right_hand_side: anytype) @TypeOf(left_hand_side, right_hand_side) {
+    return if (left_hand_side < right_hand_side) right_hand_side else left_hand_side;
 }
 
 /// Constrain `x` to the range `[min_val, max_val]`.
@@ -200,23 +200,23 @@ pub fn step(edge: anytype, value: anytype) @TypeOf(edge, value) {
 /// (edge1 - edge0), 0, 1)`. Produces a smooth 0→1 transition with zero
 /// slope at both ends — use for easing, anti-aliased edges, soft falloff.
 pub fn smoothstep(edge0: anytype, edge1: anytype, value: anytype) @TypeOf(edge0, edge1, value) {
-    const T = @TypeOf(edge0, edge1, value);
-    const t = clamp((value - edge0) / (edge1 - edge0), @as(T, 0), @as(T, 1));
-    return t * t * (@as(T, 3) - @as(T, 2) * t);
+    const scalar_type = @TypeOf(edge0, edge1, value);
+    const t = clamp((value - edge0) / (edge1 - edge0), @as(scalar_type, 0), @as(scalar_type, 1));
+    return t * t * (@as(scalar_type, 3) - @as(scalar_type, 2) * t);
 }
 
 /// Fused multiply-add `a*b + c` with a single rounding step (IEEE `fma`).
 /// More accurate than `a*b + c`; use in sensitive accumulations (matrices,
 /// sums of many terms) to reduce rounding error.
-pub fn fma(lhs: anytype, rhs: anytype, addend: anytype) @TypeOf(lhs, rhs, addend) {
-    return @mulAdd(@TypeOf(lhs, rhs, addend), lhs, rhs, addend);
+pub fn fma(left_hand_side: anytype, right_hand_side: anytype, addend: anytype) @TypeOf(left_hand_side, right_hand_side, addend) {
+    return @mulAdd(@TypeOf(left_hand_side, right_hand_side, addend), left_hand_side, right_hand_side, addend);
 }
 
 /// Split `x` into its integral and fractional parts; both parts keep the
 /// sign of `x` (unlike `fract`, which is always positive).
 pub fn modf(value: anytype) struct { fract: @TypeOf(value), integral: @TypeOf(value) } {
-    const T = @TypeOf(value);
-    const integral: T = trunc(value);
+    const scalar_type = @TypeOf(value);
+    const integral: scalar_type = trunc(value);
     return .{ .fract = value - integral, .integral = integral };
 }
 
@@ -280,21 +280,21 @@ pub fn tan(value: anytype) @TypeOf(value) {
 /// `[-1, 1]` — clamp the argument first when the source is not guaranteed
 /// to be normalized.
 pub fn asin(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.asin(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.asin(@as(scalar_type, value));
 }
 
 /// Arccosine, result in `[0, pi]`. NaN for inputs outside `[-1, 1]`.
 pub fn acos(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.acos(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.acos(@as(scalar_type, value));
 }
 
 /// Arctangent, result in `[-pi/2, pi/2]`. For a full 360° angle from a
 /// vector use `atan2(y, x)` instead.
 pub fn atan(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.atan(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.atan(@as(scalar_type, value));
 }
 
 /// Quadrant-correct arctangent of `y/x`, result in `(-pi, pi]`.
@@ -302,46 +302,46 @@ pub fn atan(value: anytype) rtType(@TypeOf(value)) {
 /// `atan2(dy, dx)` gives the full 360° angle, `atan2(y, x) == pi/2` for
 /// `(x, y) == (0, 1)`.
 pub fn atan2(y: anytype, x: anytype) rtType(@TypeOf(y, x)) {
-    const T = rtType(@TypeOf(y, x));
-    return std.math.atan2(@as(T, y), @as(T, x));
+    const scalar_type = rtType(@TypeOf(y, x));
+    return std.math.atan2(@as(scalar_type, y), @as(scalar_type, x));
 }
 
 /// Hyperbolic sine.
 pub fn sinh(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.sinh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.sinh(@as(scalar_type, value));
 }
 
 /// Hyperbolic cosine. Use for catenary-style curves and for the stable
 /// `cosh(x) + sinh(x) == exp(x)` identity.
 pub fn cosh(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.cosh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.cosh(@as(scalar_type, value));
 }
 
 /// Hyperbolic tangent, result in `(-1, 1)`. Use as a smooth saturating
 /// (sigmoid-like) response curve for velocities/joystick inputs.
 pub fn tanh(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.tanh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.tanh(@as(scalar_type, value));
 }
 
 /// Inverse hyperbolic sine, defined for all reals.
 pub fn asinh(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.asinh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.asinh(@as(scalar_type, value));
 }
 
 /// Inverse hyperbolic cosine, defined for `x >= 1`.
 pub fn acosh(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.acosh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.acosh(@as(scalar_type, value));
 }
 
 /// Inverse hyperbolic tangent, defined for `|x| < 1`.
 pub fn atanh(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return std.math.atanh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return std.math.atanh(@as(scalar_type, value));
 }
 
 // ---- exponential ----
@@ -350,8 +350,8 @@ pub fn atanh(value: anytype) rtType(@TypeOf(value)) {
 /// non-integer exponent. Typical uses: easing curves `pow(t, 2)`,
 /// exponential falloff, gamma correction.
 pub fn pow(base: anytype, exponent: anytype) rtType(@TypeOf(base, exponent)) {
-    const T = rtType(@TypeOf(base, exponent));
-    return std.math.pow(T, base, exponent);
+    const scalar_type = rtType(@TypeOf(base, exponent));
+    return std.math.pow(scalar_type, base, exponent);
 }
 
 /// Euler's number raised to `x`. Base function for natural-log math;
@@ -402,9 +402,9 @@ pub fn bitCount(value: anytype) i32 {
 /// Example: `findLSB(0b01010000) == 4`. Use to extract the lowest set flag
 /// or to fast-divide by the trailing power of two.
 pub fn findLSB(value: anytype) i32 {
-    const T = @TypeOf(value);
+    const scalar_type = @TypeOf(value);
     if (value == 0) return -1;
-    const U = std.meta.Int(.unsigned, @typeInfo(T).int.bits);
+    const U = std.meta.Int(.unsigned, @typeInfo(scalar_type).int.bits);
     return @as(i32, @ctz(@as(U, @bitCast(value))));
 }
 
@@ -413,8 +413,8 @@ pub fn findLSB(value: anytype) i32 {
 /// `findMSB(-1) == 31`. Use `findMSB(x)` as a cheap `floor(log2(x))` for
 /// positive integers.
 pub fn findMSB(value: anytype) i32 {
-    const T = @TypeOf(value);
-    const bits: comptime_int = @typeInfo(T).int.bits;
+    const scalar_type = @TypeOf(value);
+    const bits: comptime_int = @typeInfo(scalar_type).int.bits;
     if (value == 0) return -1;
     var v = value;
     comptime var shift: u7 = 1;
@@ -430,8 +430,8 @@ pub fn findMSB(value: anytype) i32 {
 /// `bitfieldExtract`. Example: `bitfieldExtract(0b11011010, 3, 4) == 0b1011`.
 /// Use for decoding packed bitfields (flag groups, color channels).
 pub fn bitfieldExtract(value: anytype, offset: i32, bits: i32) @TypeOf(value) {
-    const T = @TypeOf(value);
-    const U = std.meta.Int(.unsigned, @typeInfo(T).int.bits);
+    const scalar_type = @TypeOf(value);
+    const U = std.meta.Int(.unsigned, @typeInfo(scalar_type).int.bits);
     const uv: U = @bitCast(value);
     const mask: U = (@as(U, 1) << @intCast(bits)) -% 1;
     const extracted = (uv >> @intCast(offset)) & mask;
@@ -442,8 +442,8 @@ pub fn bitfieldExtract(value: anytype, offset: i32, bits: i32) @TypeOf(value) {
 /// bits of `insert`; all other bits of `base` are kept.
 /// Use for packing several small fields into one integer.
 pub fn bitfieldInsert(base: anytype, insert: anytype, offset: i32, bits: i32) @TypeOf(base, insert) {
-    const T = @TypeOf(base, insert);
-    const U = std.meta.Int(.unsigned, @typeInfo(T).int.bits);
+    const scalar_type = @TypeOf(base, insert);
+    const U = std.meta.Int(.unsigned, @typeInfo(scalar_type).int.bits);
     const ub: U = @bitCast(base);
     const ui: U = @bitCast(insert);
     const mask: U = (@as(U, 1) << @intCast(bits)) -% 1;
@@ -462,18 +462,18 @@ pub const AddCarryResult = struct { sum: u32, carry: u32 };
 /// Unsigned addition that reports overflow: returns `sum` (wrapping) and
 /// `carry == 1` if `x + y` exceeded the type's range. Use for multi-word
 /// (big number) arithmetic chains.
-pub fn uaddCarry(lhs: anytype, rhs: anytype) struct { sum: @TypeOf(lhs, rhs), carry: @TypeOf(lhs, rhs) } {
-    const T = @TypeOf(lhs, rhs);
-    const r = @addWithOverflow(lhs, rhs);
-    return .{ .sum = r[0], .carry = if (r[1]) @as(T, 1) else @as(T, 0) };
+pub fn uaddCarry(left_hand_side: anytype, right_hand_side: anytype) struct { sum: @TypeOf(left_hand_side, right_hand_side), carry: @TypeOf(left_hand_side, right_hand_side) } {
+    const scalar_type = @TypeOf(left_hand_side, right_hand_side);
+    const r = @addWithOverflow(left_hand_side, right_hand_side);
+    return .{ .sum = r[0], .carry = if (r[1]) @as(scalar_type, 1) else @as(scalar_type, 0) };
 }
 
 /// Unsigned subtraction that reports underflow: returns `diff` (wrapping)
 /// and `borrow == 1` if `y > x`. Use for multi-word arithmetic chains.
-pub fn usubBorrow(lhs: anytype, rhs: anytype) struct { diff: @TypeOf(lhs, rhs), borrow: @TypeOf(lhs, rhs) } {
-    const T = @TypeOf(lhs, rhs);
-    const r = @subWithOverflow(lhs, rhs);
-    return .{ .diff = r[0], .borrow = if (r[1]) @as(T, 1) else @as(T, 0) };
+pub fn usubBorrow(left_hand_side: anytype, right_hand_side: anytype) struct { diff: @TypeOf(left_hand_side, right_hand_side), borrow: @TypeOf(left_hand_side, right_hand_side) } {
+    const scalar_type = @TypeOf(left_hand_side, right_hand_side);
+    const r = @subWithOverflow(left_hand_side, right_hand_side);
+    return .{ .diff = r[0], .borrow = if (r[1]) @as(scalar_type, 1) else @as(scalar_type, 0) };
 }
 
 // ---- reductions ----
@@ -510,10 +510,10 @@ pub fn max4(value1: anytype, value2: anytype, value3: anytype, value4: anytype) 
 /// NaN-tolerant minimum (IEEE `fmin`): if one argument is NaN the other is
 /// returned, so a single bad value cannot poison the result. Use for
 /// clamping in pipelines where NaN may legitimately appear.
-pub fn fmin(lhs: anytype, rhs: anytype) @TypeOf(lhs, rhs) {
-    if (isNan(lhs)) return rhs;
-    if (isNan(rhs)) return lhs;
-    return min(lhs, rhs);
+pub fn fmin(left_hand_side: anytype, right_hand_side: anytype) @TypeOf(left_hand_side, right_hand_side) {
+    if (isNan(left_hand_side)) return right_hand_side;
+    if (isNan(right_hand_side)) return left_hand_side;
+    return min(left_hand_side, right_hand_side);
 }
 
 /// NaN-tolerant minimum of three values.
@@ -534,10 +534,10 @@ pub fn fmin4(value1: anytype, value2: anytype, value3: anytype, value4: anytype)
 }
 
 /// NaN-tolerant maximum (IEEE `fmax`): NaN arguments are ignored.
-pub fn fmax(lhs: anytype, rhs: anytype) @TypeOf(lhs, rhs) {
-    if (isNan(lhs)) return rhs;
-    if (isNan(rhs)) return lhs;
-    return max(lhs, rhs);
+pub fn fmax(left_hand_side: anytype, right_hand_side: anytype) @TypeOf(left_hand_side, right_hand_side) {
+    if (isNan(left_hand_side)) return right_hand_side;
+    if (isNan(right_hand_side)) return left_hand_side;
+    return max(left_hand_side, right_hand_side);
 }
 
 /// NaN-tolerant maximum of three values.
@@ -566,8 +566,8 @@ pub fn fclamp(value: anytype, min_val: anytype, max_val: anytype) @TypeOf(value,
 /// Clamp into `[0, 1]`. The standard way to turn any value into a valid
 /// interpolation factor, alpha or normalized coordinate.
 pub fn clamp01(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
-    return clamp(value, @as(T, 0), @as(T, 1));
+    const scalar_type = @TypeOf(value);
+    return clamp(value, @as(scalar_type, 0), @as(scalar_type, 1));
 }
 
 /// Sawtooth wave in `[0, 1)` with period 1 (same as `fract`). Use to loop
@@ -588,132 +588,132 @@ pub fn mirrorClamp(value: anytype) @TypeOf(value) {
 /// `0 → 1 → 0 → 1 ...`. Use for ping-pong animation loops and mirrored
 /// texture tiling.
 pub fn mirrorRepeat(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
+    const scalar_type = @TypeOf(value);
     const abs_x = abs(value);
-    const clamp_v = mod(floor(abs_x), @as(T, 2));
+    const clamp_v = mod(floor(abs_x), @as(scalar_type, 2));
     const floor_v = floor(abs_x);
     const rest = abs_x - floor_v;
     const mirror = clamp_v + rest;
-    return mix(rest, @as(T, 1) - rest, mirror >= @as(T, 1));
+    return mix(rest, @as(scalar_type, 1) - rest, mirror >= @as(scalar_type, 1));
 }
 
 /// Round to nearest `i32` using `int(x + 0.5)` (truncating). Note this is
 /// asymmetric for negatives (`iround(-1.5) == -1`), matching GLSL `iround`.
 /// Use when the result must be fed into an integer API.
 pub fn iround(value: anytype) i32 {
-    const T = rtType(@TypeOf(value));
-    return @as(i32, @intFromFloat(@as(T, value) + @as(T, 0.5)));
+    const scalar_type = rtType(@TypeOf(value));
+    return @as(i32, @intFromFloat(@as(scalar_type, value) + @as(scalar_type, 0.5)));
 }
 
 /// Round to nearest `u32` via `uint(x + 0.5)`; the input is expected to be
 /// non-negative.
 pub fn uround(value: anytype) u32 {
-    const T = rtType(@TypeOf(value));
-    return @as(u32, @intFromFloat(@as(T, value) + @as(T, 0.5)));
+    const scalar_type = rtType(@TypeOf(value));
+    return @as(u32, @intFromFloat(@as(scalar_type, value) + @as(scalar_type, 0.5)));
 }
 
 // ---- ext/scalar_reciprocal ----
 
 /// Secant `1/cos(x)`. Singular at `pi/2 + k*pi`.
 pub fn sec(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return @as(T, 1) / cos(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return @as(scalar_type, 1) / cos(@as(scalar_type, value));
 }
 
 /// Cosecant `1/sin(x)`. Singular at multiples of `pi`.
 pub fn csc(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return @as(T, 1) / sin(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return @as(scalar_type, 1) / sin(@as(scalar_type, value));
 }
 
 /// Cotangent `cos(x)/sin(x)`, computed as `tan(pi/2 - x)` for numerical
 /// stability around small angles. Singular at multiples of `pi`.
 pub fn cot(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    const pi_over_2: T = cast(T, 3.1415926535897932384626433832795 / 2.0);
-    return tan(pi_over_2 - @as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    const pi_over_2: scalar_type = cast(scalar_type, 3.1415926535897932384626433832795 / 2.0);
+    return tan(pi_over_2 - @as(scalar_type, value));
 }
 
 /// Inverse secant `acos(1/x)`, defined for `|x| >= 1`.
 pub fn asec(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return acos(@as(T, 1) / @as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return acos(@as(scalar_type, 1) / @as(scalar_type, value));
 }
 
 /// Inverse cosecant `asin(1/x)`, defined for `|x| >= 1`.
 pub fn acsc(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return asin(@as(T, 1) / @as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return asin(@as(scalar_type, 1) / @as(scalar_type, value));
 }
 
 /// Inverse cotangent `pi/2 - atan(x)`, result in `(0, pi)`.
 pub fn acot(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    const pi_over_2: T = cast(T, 3.1415926535897932384626433832795 / 2.0);
-    return pi_over_2 - atan(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    const pi_over_2: scalar_type = cast(scalar_type, 3.1415926535897932384626433832795 / 2.0);
+    return pi_over_2 - atan(@as(scalar_type, value));
 }
 
 /// Hyperbolic secant `1/cosh(x)` — a bell-shaped curve that decays to
 /// zero at large |x|.
 pub fn sech(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return @as(T, 1) / cosh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return @as(scalar_type, 1) / cosh(@as(scalar_type, value));
 }
 
 /// Hyperbolic cosecant `1/sinh(x)`. Singular at `x == 0`.
 pub fn csch(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return @as(T, 1) / sinh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return @as(scalar_type, 1) / sinh(@as(scalar_type, value));
 }
 
 /// Hyperbolic cotangent `cosh(x)/sinh(x)`. Singular at `x == 0`, tends to
 /// ±1 at infinity.
 pub fn coth(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return cosh(@as(T, value)) / sinh(@as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return cosh(@as(scalar_type, value)) / sinh(@as(scalar_type, value));
 }
 
 /// Inverse hyperbolic secant `acosh(1/x)`, defined for `x` in `(0, 1]`.
 pub fn asech(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return acosh(@as(T, 1) / @as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return acosh(@as(scalar_type, 1) / @as(scalar_type, value));
 }
 
 /// Inverse hyperbolic cosecant `asinh(1/x)`, defined for `x != 0`.
 pub fn acsch(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return asinh(@as(T, 1) / @as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return asinh(@as(scalar_type, 1) / @as(scalar_type, value));
 }
 
 /// Inverse hyperbolic cotangent `atanh(1/x)`, defined for `|x| > 1`.
 pub fn acoth(value: anytype) rtType(@TypeOf(value)) {
-    const T = rtType(@TypeOf(value));
-    return atanh(@as(T, 1) / @as(T, value));
+    const scalar_type = rtType(@TypeOf(value));
+    return atanh(@as(scalar_type, 1) / @as(scalar_type, value));
 }
 
 // ---- ext/scalar_relational + gtc/epsilon ----
 
 /// Tolerance comparison: true if `|x - y| <= eps`. Use instead of `==`
 /// whenever `x`/`y` are results of floating-point arithmetic.
-pub fn equalEps(lhs: anytype, rhs: anytype, epsilon: anytype) bool {
-    return abs(lhs - rhs) <= epsilon;
+pub fn equalEps(left_hand_side: anytype, right_hand_side: anytype, epsilon: anytype) bool {
+    return abs(left_hand_side - right_hand_side) <= epsilon;
 }
 
 /// Complement of `equalEps`: true if `|x - y| > eps`.
-pub fn notEqualEps(lhs: anytype, rhs: anytype, epsilon: anytype) bool {
-    return abs(lhs - rhs) > epsilon;
+pub fn notEqualEps(left_hand_side: anytype, right_hand_side: anytype, epsilon: anytype) bool {
+    return abs(left_hand_side - right_hand_side) > epsilon;
 }
 
 /// Strict tolerance comparison: true if `|x - y| < eps`. The epsilon
 /// variant of GLM's gtc/epsilon module — useful for "is this inside a
 /// tolerance ball" checks.
-pub fn epsilonEqual(lhs: anytype, rhs: anytype, epsilon: anytype) bool {
-    return abs(lhs - rhs) < epsilon;
+pub fn epsilonEqual(left_hand_side: anytype, right_hand_side: anytype, epsilon: anytype) bool {
+    return abs(left_hand_side - right_hand_side) < epsilon;
 }
 
 /// Complement of `epsilonEqual`: true if `|x - y| >= eps`.
-pub fn epsilonNotEqual(lhs: anytype, rhs: anytype, epsilon: anytype) bool {
-    return abs(lhs - rhs) >= epsilon;
+pub fn epsilonNotEqual(left_hand_side: anytype, right_hand_side: anytype, epsilon: anytype) bool {
+    return abs(left_hand_side - right_hand_side) >= epsilon;
 }
 
 const FltInt = struct {
@@ -730,24 +730,24 @@ const FltInt = struct {
 /// with the sign bit handled separately). Unlike an epsilon test this works
 /// at *any* magnitude — `1.0` vs the float just below it is 1 ULP, the same
 /// as `1e30` vs its neighbor. Caveat: `+0.0` and `-0.0` compare unequal.
-pub fn equalULP(lhs: anytype, rhs: anytype, max_ulps: anytype) bool {
-    const T = @TypeOf(lhs);
-    if (T == f64) {
-        const a: i64 = FltInt.asI64(lhs);
-        const b: i64 = FltInt.asI64(rhs);
+pub fn equalULP(left_hand_side: anytype, right_hand_side: anytype, max_ulps: anytype) bool {
+    const scalar_type = @TypeOf(left_hand_side);
+    if (scalar_type == f64) {
+        const a: i64 = FltInt.asI64(left_hand_side);
+        const b: i64 = FltInt.asI64(right_hand_side);
         if ((a < 0) != (b < 0)) return false;
         return abs(a - b) <= @as(i64, max_ulps);
     } else {
-        const a: i32 = FltInt.asI32(lhs);
-        const b: i32 = FltInt.asI32(rhs);
+        const a: i32 = FltInt.asI32(left_hand_side);
+        const b: i32 = FltInt.asI32(right_hand_side);
         if ((a < 0) != (b < 0)) return false;
         return abs(a - b) <= @as(i32, max_ulps);
     }
 }
 
 /// Complement of `equalULP`.
-pub fn notEqualULP(lhs: anytype, rhs: anytype, max_ulps: anytype) bool {
-    return !equalULP(lhs, rhs, max_ulps);
+pub fn notEqualULP(left_hand_side: anytype, right_hand_side: anytype, max_ulps: anytype) bool {
+    return !equalULP(left_hand_side, right_hand_side, max_ulps);
 }
 
 // ---- ext/scalar_ulp ----
@@ -755,8 +755,8 @@ pub fn notEqualULP(lhs: anytype, rhs: anytype, max_ulps: anytype) bool {
 /// Next representable float strictly greater than `x` (walks toward +inf).
 /// Use to iterate a float lattice or to compute "1 ULP above" a value.
 pub fn nextFloat(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
-    return std.math.nextAfter(value, std.math.inf(T));
+    const scalar_type = @TypeOf(value);
+    return std.math.nextAfter(value, std.math.inf(scalar_type));
 }
 
 /// Apply `nextFloat` `ulps` times — moves `ulps` steps up the float
@@ -771,8 +771,8 @@ pub fn nextFloatN(value: anytype, ulps: i32) @TypeOf(value) {
 /// Next representable float strictly smaller than `x` (walks toward -inf).
 /// Use to compute "1 ULP below" a value.
 pub fn prevFloat(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
-    return std.math.nextAfter(value, -std.math.inf(T));
+    const scalar_type = @TypeOf(value);
+    return std.math.nextAfter(value, -std.math.inf(scalar_type));
 }
 
 /// Apply `prevFloat` `ulps` times — moves `ulps` steps down the float
@@ -788,13 +788,13 @@ pub fn prevFloatN(value: anytype, ulps: i32) @TypeOf(value) {
 /// representable floats between them). Note: this variant intentionally
 /// skips the sign-bit check of `equalULP`, so `floatDistance(-1, 1)` is a
 /// huge number. Use for a magnitude-independent error metric.
-pub fn floatDistance(lhs: anytype, rhs: anytype) i64 {
-    const T = @TypeOf(lhs, rhs);
-    if (T == f64) {
-        return abs(FltInt.asI64(lhs) - FltInt.asI64(rhs));
+pub fn floatDistance(left_hand_side: anytype, right_hand_side: anytype) i64 {
+    const scalar_type = @TypeOf(left_hand_side, right_hand_side);
+    if (scalar_type == f64) {
+        return abs(FltInt.asI64(left_hand_side) - FltInt.asI64(right_hand_side));
     } else {
-        const a: f32 = @floatCast(lhs);
-        const b: f32 = @floatCast(rhs);
+        const a: f32 = @floatCast(left_hand_side);
+        const b: f32 = @floatCast(right_hand_side);
         return abs(@as(i64, FltInt.asI32(a)) - @as(i64, FltInt.asI32(b)));
     }
 }
@@ -832,8 +832,8 @@ pub fn uintBitsToFloat(uint_bits: u32) f32 {
 /// for signed types, and `0` also returns true (bit trick, matches GLM).
 /// Use to validate sizes before bit-shift scaling.
 pub fn isPowerOfTwo(value: anytype) bool {
-    const T = @TypeOf(value);
-    const result = if (isSigned(T)) abs(value) else value;
+    const scalar_type = @TypeOf(value);
+    const result = if (isSigned(scalar_type)) abs(value) else value;
     return (result & (result - 1)) == 0;
 }
 
@@ -854,8 +854,8 @@ pub fn isMultiple(value: anytype, multiple: anytype) bool {
 /// `ceilPowerOfTwo(5) == 8`, `ceilPowerOfTwo(-5) == -8`. Use for buffer
 /// sizes, texture dimensions and data alignment.
 pub fn ceilPowerOfTwo(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
-    const bits: comptime_int = @typeInfo(T).int.bits;
+    const scalar_type = @TypeOf(value);
+    const bits: comptime_int = @typeInfo(scalar_type).int.bits;
     const sign_val = sign(value);
     var v = abs(value) -% 1;
     comptime var shift: u6 = 1;
@@ -868,18 +868,18 @@ pub fn ceilPowerOfTwo(value: anytype) @TypeOf(value) {
 /// Largest power of two `<= value`: `floorPowerOfTwo(5) == 4`. For values
 /// that are already powers of two the input is returned unchanged.
 pub fn floorPowerOfTwo(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
+    const scalar_type = @TypeOf(value);
     if (isPowerOfTwo(value)) return value;
-    return @as(T, 1) << @intCast(findMSB(value));
+    return @as(scalar_type, 1) << @intCast(findMSB(value));
 }
 
 /// Nearest power of two; ties resolve upward (`roundPowerOfTwo(5) == 4`,
 /// `roundPowerOfTwo(7) == 8`, `roundPowerOfTwo(6) == 8`). Use when you need
 /// a power-of-two that "best" approximates a size.
 pub fn roundPowerOfTwo(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
+    const scalar_type = @TypeOf(value);
     if (isPowerOfTwo(value)) return value;
-    const prev = @as(T, 1) << @intCast(findMSB(value));
+    const prev = @as(scalar_type, 1) << @intCast(findMSB(value));
     const next = prev << 1;
     return if ((next - value) < (value - prev)) next else prev;
 }
@@ -891,9 +891,9 @@ pub fn nextPowerOfTwo(value: anytype) @TypeOf(value) {
 
 /// Alias for `floorPowerOfTwo`.
 pub fn prevPowerOfTwo(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
+    const scalar_type = @TypeOf(value);
     if (isPowerOfTwo(value)) return value;
-    return @as(T, 1) << @intCast(findMSB(value));
+    return @as(scalar_type, 1) << @intCast(findMSB(value));
 }
 
 /// Alias for `ceilMultiple`.
@@ -911,15 +911,15 @@ pub fn prevMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple
 /// floats and signed/unsigned ints. Use to round up to an alignment or a
 /// fixed stride: `ceilMultiple(byte_count, 16)`.
 pub fn ceilMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
-    const T = @TypeOf(source, multiple);
-    if (comptime isFloat(T)) {
-        if (source > @as(T, 0)) {
+    const scalar_type = @TypeOf(source, multiple);
+    if (comptime isFloat(scalar_type)) {
+        if (source > @as(scalar_type, 0)) {
             return source + (multiple - @rem(source, multiple));
         } else {
             return source + @rem(-source, multiple);
         }
-    } else if (comptime isSigned(T)) {
-        if (source > @as(T, 0)) {
+    } else if (comptime isSigned(scalar_type)) {
+        if (source > @as(scalar_type, 0)) {
             const tmp = source - 1;
             return tmp + (multiple - remInt(tmp, multiple));
         } else {
@@ -935,14 +935,14 @@ pub fn ceilMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple
 /// `floorMultiple(14, 8) == 8`, `floorMultiple(15, 8) == 8`. Use to snap a
 /// value down to a grid.
 pub fn floorMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
-    const T = @TypeOf(source, multiple);
-    if (comptime isFloat(T)) {
-        if (source >= @as(T, 0)) {
+    const scalar_type = @TypeOf(source, multiple);
+    if (comptime isFloat(scalar_type)) {
+        if (source >= @as(scalar_type, 0)) {
             return source - @rem(source, multiple);
         } else {
             return source - @rem(source, multiple) - multiple;
         }
-    } else if (source >= @as(T, 0)) {
+    } else if (source >= @as(scalar_type, 0)) {
         return source - remInt(source, multiple);
     } else {
         const tmp = source + 1;
@@ -954,15 +954,15 @@ pub fn floorMultiple(source: anytype, multiple: anytype) @TypeOf(source, multipl
 /// `floorMultiple`; negative inputs use a compensating +1 trick so the
 /// result is always a multiple of `multiple`.
 pub fn roundMultiple(source: anytype, multiple: anytype) @TypeOf(source, multiple) {
-    const T = @TypeOf(source, multiple);
-    if (comptime isFloat(T)) {
-        if (source >= @as(T, 0)) {
+    const scalar_type = @TypeOf(source, multiple);
+    if (comptime isFloat(scalar_type)) {
+        if (source >= @as(scalar_type, 0)) {
             return source - @rem(source, multiple);
         } else {
-            const tmp = source + @as(T, 1);
+            const tmp = source + @as(scalar_type, 1);
             return tmp - @rem(tmp, multiple) - multiple;
         }
-    } else if (source >= @as(T, 0)) {
+    } else if (source >= @as(scalar_type, 0)) {
         return source - remInt(source, multiple);
     } else {
         const tmp = source + 1;
@@ -974,16 +974,16 @@ pub fn roundMultiple(source: anytype, multiple: anytype) @TypeOf(source, multipl
 /// consecutive set bits, or `-1` if `x` has fewer set bits in total.
 /// Use for locating the topmost dense region of a bitmask.
 pub fn findNSB(value: anytype, significant_bit_count: i32) i32 {
-    const T = @TypeOf(value);
-    const bits: comptime_int = @typeInfo(T).int.bits;
+    const scalar_type = @TypeOf(value);
+    const bits: comptime_int = @typeInfo(scalar_type).int.bits;
     if (bitCount(value) < significant_bit_count) return -1;
-    const one: T = 1;
+    const one: scalar_type = 1;
     var bit_pos: i32 = 0;
     var key = value;
     var n_bit_count = significant_bit_count;
     var bit_step: i32 = @intCast(bits / 2);
     while (key > one) {
-        const mask = (@as(T, 1) << @intCast(bit_step)) - 1;
+        const mask = (@as(scalar_type, 1) << @intCast(bit_step)) - 1;
         const current_key = key & mask;
         const current_bit_count = bitCount(current_key);
         if (n_bit_count > current_bit_count) {
