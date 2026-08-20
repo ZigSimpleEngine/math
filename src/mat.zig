@@ -16,7 +16,7 @@ const scalar = @import("scalar.zig");
 const vec = @import("vec.zig");
 const Vec = vec.Vec;
 
-/// Returns `true` if `scalar_type` looks like a matrix produced by `Mat(num_columns, num_rows, scalar_type)`
+/// Returns `true` if `candidate_type` looks like a matrix produced by `Mat(num_columns, num_rows, scalar_type)`
 /// (it declares `cols`/`rows` and carries a `data` field). Use to dispatch
 /// between scalar/vector/matrix operands in generic code.
 pub fn isMat(comptime candidate_type: type) bool {
@@ -58,7 +58,7 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return diag(@as(scalar_type, 1));
         }
 
-        /// Matrix with every element equal to `v` (GLM 1.1 `mat(f)`
+        /// Matrix with every element equal to `value` (GLM 1.1 `mat(f)`
         /// elementwise variant). Useful to build per-element factors, e.g.
         /// GLM's matrix `mix` uses `ones() - a`.
         pub fn one(value: anytype) Self {
@@ -71,8 +71,8 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return one(@as(scalar_type, 1));
         }
 
-        /// Diagonal matrix with value `v` on the diagonal (GLM `mat(v)` for
-        /// a scalar v): `diag(1)` is `identity()`, `diag(2)` scales by 2.
+        /// Diagonal matrix with value `value` on the diagonal (GLM `mat(v)` for
+        /// a scalar value): `diag(1)` is `identity()`, `diag(2)` scales by 2.
         pub fn diag(value: anytype) Self {
             if (comptime num_columns != num_rows) @compileError("diag requires a square matrix");
             var res = zero();
@@ -106,25 +106,25 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
 
         // ---- accessors ----
 
-        /// Read element at (column `c`, row `r`), 0-based, runtime indices.
+        /// Read element at (column `col_index`, row `row_index`), 0-based, runtime indices.
         /// Prefer `col(i).v[r]` directly for hot paths — it compiles to a
         /// lane load without the extra call.
         pub inline fn get(self: Self, col_index: usize, row_index: usize) scalar_type {
             return self.data[col_index].v[row_index];
         }
 
-        /// Write element at (column `c`, row `r`) of a mutable matrix.
+        /// Write element at (column `col_index`, row `row_index`) of a mutable matrix.
         pub inline fn set(self: *Self, col_index: usize, row_index: usize, value: scalar_type) void {
             self.data[col_index].v[row_index] = value;
         }
 
-        /// Column c as a vector (GLM `column(m, c)`); indexes 0-based.
+        /// Column `i` as a vector (GLM `column(m, c)`); indexes 0-based.
         /// Reading a column is free — it is the native storage unit.
         pub inline fn col(self: Self, i: usize) Vec(num_rows, scalar_type) {
             return self.data[i];
         }
 
-        /// Row r as a vector (GLM `row(m, r)`), gathered across columns.
+        /// Row `i` as a vector (GLM `row(m, r)`), gathered across columns.
         /// Costlier than `col`; use for dot products with row-major data.
         pub fn row(self: Self, i: usize) Vec(num_columns, scalar_type) {
             var res: Vec(num_columns, scalar_type) = undefined;
@@ -151,7 +151,7 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
-        /// Scalar multiplication: every element × `s` (GLM `mat * scalar`).
+        /// Scalar multiplication: every element × `scalar_value` (GLM `mat * scalar`).
         /// Use to scale a matrix's effect (e.g. dampen a correction step)
         /// or with `1/det` when inverting.
         pub fn mulScalar(self: Self, scalar_value: anytype) Self {
@@ -169,8 +169,8 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
-        /// Matrix product `self * m` (GLM `mat * mat`): column-major
-        /// multiplication. The result has `m`'s column count and `self`'s
+        /// Matrix product `self * right_hand_side` (GLM `mat * mat`): column-major
+        /// multiplication. The result has `right_hand_side`'s column count and `self`'s
         /// row count (so `Mat(3,2).mul(Mat(4,3))` is a 4×2 matrix — GLM's
         /// `mat<num_columns,num_rows>*mat<C2,num_columns>` shape rule). Use for composing transforms
         /// as `model.mul(view)` (view applies first). Order matters:
@@ -335,7 +335,7 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
 
         // ---- transforms (4x4 only) ----
 
-        /// Append a translation by `v` (GLM `translate(m, v)`): rebuilds
+        /// Append a translation by `translation` (GLM `translate(m, v)`): rebuilds
         /// column 3 as a linear combination of the existing columns, which
         /// makes the translation live in the LOCAL frame of `self`. Compose
         /// left-to-right: `matrix.identity().translate(t).rotate(θ, axis)` puts
@@ -350,10 +350,10 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
-        /// Append a non-uniform scale by `v` (GLM `scale(m, v)`): multiplies the
-        /// first three columns by the respective `v` components, keeping the
+        /// Append a non-uniform scale by `scale_factors` (GLM `scale(m, v)`): multiplies the
+        /// first three columns by the respective `scale_factors` components, keeping the
         /// translation column untouched, so the scale is applied in the
-        /// local frame too. `scale(v)` with `v = (1,1,1)` is a no-op.
+        /// local frame too. `scale(scale_factors)` with `scale_factors = (1,1,1)` is a no-op.
         pub fn scale(self: Self, scale_factors: Vec(3, scalar_type)) Self {
             if (comptime num_columns != 4 or num_rows != 4) @compileError("scale requires a 4x4 matrix");
             var res: Self = undefined;
@@ -490,8 +490,8 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         }
 
         /// Blend between `self` and `right_hand_side` (GLM `mix(x, y, a)`):
-        /// - `a` scalar: per-element `x·(1−a) + y·a` (the linear lerp),
-        /// - `a` matrix: GLM's quirky elementwise formula
+        /// - `factor` scalar: per-element `x·(1−a) + y·a` (the linear lerp),
+        /// - `factor` matrix: GLM's quirky elementwise formula
         ///   `x · (ones() − a) + y · a` — note the `1` is a full ones
         ///   matrix, NOT the identity, so off-diagonal elements blend too.
         /// Use the scalar form to fade between two keyframe transforms.
@@ -512,7 +512,7 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         /// Backend of the four tolerance comparisons: for each column c,
         /// bits[c] is true iff the column vectors `self.data[c]` and
         /// `right_hand_side.data[c]` agree (need_all) or differ (any) within the
-        /// per-column tolerance `arg` — which may be a scalar or a vector
+        /// per-column tolerance `tolerance` — which may be a scalar or a vector
         /// whose component c holds column c's tolerance. `ulp` selects the
         /// ULP metric instead of the absolute epsilon.
         fn colCmp(self: Self, right_hand_side: Self, comptime need_all: bool, tolerance: anytype, comptime ulp: bool) Vec(num_columns, bool) {
@@ -565,8 +565,8 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         }
 
         /// Per-column tolerance equality (GLM `equal(mat, mat, eps)`): column c
-        /// is true iff every element of column c differs by < `eps[c]`
-        /// (eps vector) or < `eps` (scalar). The standard way to assert two
+        /// is true iff every element of column c differs by < `epsilon[c]`
+        /// (epsilon vector) or < `epsilon` (scalar). The standard way to assert two
         /// transform matrices are "the same" after floating-point work.
         pub fn equalEps(self: Self, right_hand_side: Self, epsilon: anytype) Vec(num_columns, bool) {
             return self.colCmp(right_hand_side, true, epsilon, false);
@@ -1410,10 +1410,10 @@ pub fn inverseTranspose(matrix: mat4) mat4 {
 }
 // ---- GLM func_common `outerProduct` ----
 
-/// Outer product (GLM/GLSL `outerProduct(c, r)`): column vector `c`
-/// times row vector `r`, yielding the matrix `res[j][i] =
-/// c[i]*r[j]` — shaped `Mat(r.len, c.len)`, i.e. `c.len` rows and
-/// `r.len` columns. The dual of the dot product: builds a rank-1
+/// Outer product (GLM/GLSL `outerProduct(c, r)`): column vector `col_vec`
+/// times row vector `row_vec`, yielding the matrix `res[j][i] =
+/// col_vec[i]*row_vec[j]` — shaped `Mat(row_vec.len, col_vec.len)`, i.e. `col_vec.len` rows and
+/// `row_vec.len` columns. The dual of the dot product: builds a rank-1
 /// matrix such as the projector `outerProduct(n, n)` or the dyad
 /// `I − 2·outerProduct(n, n)` used in reflections.
 pub fn outerProduct(col_vec: anytype, row_vec: anytype) Mat(@TypeOf(row_vec).len, @TypeOf(col_vec).len, @TypeOf(col_vec).value_type) {

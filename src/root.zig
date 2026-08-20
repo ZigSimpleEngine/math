@@ -3,9 +3,9 @@
 //! Modules:
 //! - `scalar` — scalar math & helpers (float/int dispatch, trig,
 //!   exponential, bit ops, ULP comparisons, rounding utilities),
-//! - `vec` — vector math: `Vec(L, T)` (vec2/vec3/vec4-class vectors) with
+//! - `vec` — vector math: `Vec(component_count, scalar_type)` (vec2/vec3/vec4-class vectors) with
 //!   per-component and geometric operations,
-//! - `mat` — matrix math: `Mat(C, R, T)` (column-major, GLM layout),
+//! - `mat` — matrix math: `Mat(num_columns, num_rows, scalar_type)` (column-major, GLM layout),
 //!   transforms and the perspective/ortho/frustum clip-space family,
 //! - `quat` — quaternions: `Quat(T)` with rotation composition,
 //!   interpolation and conversions,

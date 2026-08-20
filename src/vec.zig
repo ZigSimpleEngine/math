@@ -61,7 +61,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = @splat(scalar.cast(scalar_type, 1)) };
         }
 
-        /// Vector with every component set to `v`: `vec3.fill(0.5)`.
+        /// Vector with every component set to `value`: `vec3.fill(0.5)`.
         pub inline fn fill(value: anytype) Self {
             return .{ .v = @splat(scalar.cast(scalar_type, value)) };
         }
@@ -177,7 +177,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         // ---- swizzles ----
 
-        /// Build a 2-component vector from components `a` and `b`. This is
+        /// Build a 2-component vector from the components of `self` at `index1` and `index2`. This is
         /// the GLSL swizzle mechanism: `v.zy()` reorders lanes; the source
         /// vector is copied, never modified.
         inline fn swz2(self: Self, comptime index1: usize, comptime index2: usize) Vec(2, scalar_type) {
@@ -273,7 +273,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         // ---- element-wise application helpers ----
 
-        /// Apply unary scalar function `f` to every component:
+        /// Apply unary scalar function `func` to every component:
         /// `v.apply(scalar.sin)` == `v.sin()`. Backend used by most
         /// per-component methods.
         fn apply(self: Self, comptime func: anytype) Self {
@@ -282,7 +282,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
-        /// Apply binary scalar function `f(self[i], b)` per component; `b`
+        /// Apply binary scalar function `func(self[i], right_hand_side[i])` per component; `right_hand_side`
         /// may be a full vector (component-wise) or a scalar (broadcast to
         /// every lane). Backend of min/max/pow/fmin, etc.
         fn apply2(self: Self, right_hand_side: anytype, comptime func: anytype) Self {
@@ -497,9 +497,9 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply2(right_hand_side, scalar.max);
         }
 
-        /// Component-wise clamp into [lo, hi] (GLM `clamp`). `lo`/`hi` may
+        /// Component-wise clamp into [`min_val`, `max_val`] (GLM `clamp`). `min_val`/`max_val` may
         /// each be vectors or scalars, mixed freely. `mix` order differs
-        /// from GLSL: this is `clamp(x, lo, hi)`.
+        /// from GLSL: this is `clamp(value, min_val, max_val)`.
         pub inline fn clamp(self: Self, min_val: anytype, max_val: anytype) Self {
             return self.apply3(min_val, max_val, clampHelper);
         }
@@ -508,14 +508,14 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return scalar.clamp(value, min_val, max_val);
         }
 
-        /// Linear interpolation between the receiver and `right_hand_side` by factor `a`
+        /// Linear interpolation between the receiver and `right_hand_side` by factor `factor`
         /// (GLM `mix(x, y, a)`, GLSL writes it `mix(x, y, a)` too).
-        /// - `a` scalar: uniform blend — `a = 0` returns the receiver, `a = 1`
+        /// - `factor` scalar: uniform blend — `factor = 0` returns the receiver, `factor = 1`
         ///   returns `right_hand_side`, outside [0,1] it extrapolates
-        ///   (`a.neg().mul(t).add(a.mul(1 - t))` is the GLSL formula),
-        /// - `a` vector: per-component factors,
-        /// - `a` bool (or bool vector): selects component-wise with no
-        ///   interpolation (`a` true picks `right_hand_side`). Same effect as `if`.
+        ///   (`self.mul(1 - factor).add(right_hand_side.mul(factor))` is the same GLSL formula),
+        /// - `factor` vector: per-component factors,
+        /// - `factor` bool (or bool vector): selects component-wise with no
+        ///   interpolation (`factor` true picks `right_hand_side`). Same effect as `if`.
         pub fn mix(self: Self, right_hand_side: anytype, factor: anytype) Self {
             const AT = @TypeOf(factor);
             if (comptime AT == bool) return if (factor) right_hand_side else self;
@@ -547,14 +547,14 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         }
 
         /// Per-component smoothstep (GLM `smoothstep(e0, e1, self)`): 0 at
-        /// `e0`, 1 at `e1` with a Hermite (2t³−3t²) ramp in between. Ideal
-        /// for easing transitions; where t leaves [e0,e1] the result clamps.
+        /// `edge0`, 1 at `edge1` with a Hermite (2t³−3t²) ramp in between. Ideal
+        /// for easing transitions; where t leaves [`edge0`, `edge1`] the result clamps.
         pub inline fn smoothstep(self: Self, edge0: anytype, edge1: anytype) Self {
             return self.apply3(edge0, edge1, scalar.smoothstep);
         }
 
-        /// Component-wise fused multiply-add: `self·right_hand_side + c` with a single
-        /// rounding. `right_hand_side`/`c` may be vectors or scalars (both vector → SIMD
+        /// Component-wise fused multiply-add: `self·right_hand_side + addend` with a single
+        /// rounding. `right_hand_side`/`addend` may be vectors or scalars (both vector → SIMD
         /// `@mulAdd`, mixed → per-lane scalar path).
         pub inline fn fma(self: Self, right_hand_side: anytype, addend: anytype) Self {
             const RT = @TypeOf(right_hand_side);
@@ -594,8 +594,8 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .significand = .{ .v = sg }, .exponent = .{ .v = ex } };
         }
 
-        /// Component-wise `x · 2^e` (GLM `ldexp`, GLSL `ldexp(x, exp)`).
-        /// `e` may be a vector of ints or a single int. The inverse of
+        /// Component-wise `x · 2^exponent` (GLM `ldexp`, GLSL `ldexp(x, exp)`).
+        /// `exponent` may be a vector of ints or a single int. The inverse of
         /// `frexp`: `v.frexp().significand.ldexp(v.frexp().exponent) == v`.
         pub fn ldexp(self: Self, exponent: anytype) Self {
             const ET = @TypeOf(exponent);
@@ -827,15 +827,15 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return if (normal_ref.dot(incident) < 0) self else self.neg();
         }
 
-        /// Reflect an incident vector `self` about a normal `n` (GLM
-        /// `reflect(I, N)`): `I - 2·(I·N)·N`. `n` should be normalized;
-        /// result is the mirror of `self` across the plane with normal `n`.
+        /// Reflect an incident vector `self` about a normal `normal` (GLM
+        /// `reflect(I, N)`): `I - 2·(I·N)·N`. `normal` should be normalized;
+        /// result is the mirror of `self` across the plane with normal `normal`.
         pub inline fn reflect(self: Self, normal: Self) Self {
             return self.sub(normal.mul(self.dot(normal)).mul(@as(scalar_type, 2)));
         }
 
-        /// Refract an incident vector `self` at a surface with normal `n`
-        /// and index ratio `eta` (GLM `refract(I, N, eta)` =
+        /// Refract an incident vector `self` at a surface with normal `normal`
+        /// and index ratio `index_ratio` (GLM `refract(I, N, eta)` =
         /// `refract(I, N, IOR₁/IOR₂)`). Returns the zero vector when total
         /// internal reflection occurs (k < 0). Handy for simulating glass
         /// or water rays without a full ray tracer.
@@ -1128,8 +1128,8 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         // ---- ext/vector_relational + gtc/epsilon ----
 
         /// Per-component tolerance comparison with an absolute epsilon
-        /// (GLM `equalEps(x, y, eps)`): lane true iff `|x − y| < eps`.
-        /// `eps` may be a vector or scalar. Use instead of `==` on float
+        /// (GLM `equalEps(x, y, eps)`): lane true iff `|x − y| < epsilon`.
+        /// `epsilon` may be a vector or scalar. Use instead of `==` on float
         /// data — integration results are rarely bit-exact.
         pub fn equalEps(self: Self, right_hand_side: anytype, epsilon: anytype) Vec(component_count, bool) {
             const ET = @TypeOf(epsilon);
@@ -1156,7 +1156,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// Per-component `|x − y| < eps` (GLM `epsilonEqual`). Historically
         /// GLM's epsilon versions used a relative-tolerance trick; here the
         /// behavior matches `equalEps` — an absolute comparison against
-        /// `eps` with user-controlled magnitude (GLM defaults to 0.1 for
+        /// `epsilon` with user-controlled magnitude (GLM defaults to 0.1 for
         /// floats).
         pub fn epsilonEqual(self: Self, right_hand_side: Self, epsilon: anytype) Vec(component_count, bool) {
             const ET = @TypeOf(epsilon);
@@ -1429,8 +1429,8 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         }
 
         /// Per-component index of the start of the most significant run of
-        /// `count` consecutive set bits (GLM `findNSB`), or -1 when no such
-        /// run fits. Use for slot allocators: with `count` = freelist size
+        /// `significant_bit_count` consecutive set bits (GLM `findNSB`), or -1 when no such
+        /// run fits. Use for slot allocators: with `significant_bit_count` = freelist size
         /// it finds the first spot that can host a run.
         pub fn findNSB(self: Self, significant_bit_count: anytype) Vec(component_count, i32) {
             var r: @Vector(component_count, i32) = undefined;

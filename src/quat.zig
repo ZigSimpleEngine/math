@@ -244,9 +244,9 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Rotation angle in radians (GLM `angle(qua)`): `2·acos(w)` with special
-        /// handling near the identity — the result is in [0, 2π), and with
-        /// the short-arc normalization the angle is the minimal one.
-        pub fn angle(quaternion: anytype) @TypeOf(quaternion).value_type {
+/// handling near the identity — the result is in [0, 2π), and with
+/// the short-arc normalization the angle is the minimal one.
+pub fn angle(quaternion: anytype) @TypeOf(quaternion).value_type {
     const scalar_type = @TypeOf(quaternion).value_type;
     if (scalar.abs(quaternion.w) > scalar.cos(@as(scalar_type, 0.5))) {
         const a = scalar.asin(scalar.sqrt(quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z)) * @as(scalar_type, 2);
@@ -257,11 +257,11 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Rotation axis as a unit vector (GLM `axis(qua)`): the direction q
-        /// rotates about, derived from the normalized imaginary part
-        /// `(x, y, z) / sqrt(1 − w²)`; identity-like quaternions (|w| ≈ 1)
-        /// degenerate to +z, mirroring GLM. Together with `angle` this
-        /// reconstructs `angleAxis`.
-        pub fn axis(quaternion: anytype) Vec(3, @TypeOf(quaternion).value_type) {
+/// rotates about, derived from the normalized imaginary part
+/// `(x, y, z) / sqrt(1 − w²)`; identity-like quaternions (|w| ≈ 1)
+/// degenerate to +z, mirroring GLM. Together with `angle` this
+/// reconstructs `angleAxis`.
+pub fn axis(quaternion: anytype) Vec(3, @TypeOf(quaternion).value_type) {
     const scalar_type = @TypeOf(quaternion).value_type;
     const tmp1 = @as(scalar_type, 1) - quaternion.w * quaternion.w;
     if (tmp1 <= @as(scalar_type, 0)) return Vec(3, scalar_type).init(.{ 0, 0, 1 });
@@ -270,11 +270,11 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Pitch angle in radians (GLM `pitch(qua)`): the X-axis component of
-        /// the rotation, extracted with GLM's exact atan2 formulas —
-        /// including its singularity handling (pure roll returns
-        /// `2·atan2(x, w)`). Combine with `yaw`/`roll` for debugging or
-        /// HUD displays; prefer the quaternion itself for logic.
-        pub fn pitch(quaternion: anytype) @TypeOf(quaternion).value_type {
+/// the rotation, extracted with GLM's exact atan2 formulas —
+/// including its singularity handling (pure roll returns
+/// `2·atan2(x, w)`). Combine with `yaw`/`roll` for debugging or
+/// HUD displays; prefer the quaternion itself for logic.
+pub fn pitch(quaternion: anytype) @TypeOf(quaternion).value_type {
     const scalar_type = @TypeOf(quaternion).value_type;
     const y = @as(scalar_type, 2) * (quaternion.y * quaternion.z + quaternion.w * quaternion.x);
     const x = quaternion.w * quaternion.w - quaternion.x * quaternion.x - quaternion.y * quaternion.y + quaternion.z * quaternion.z;
@@ -283,19 +283,19 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Yaw angle in radians (GLM `yaw(qua)`): the Y-axis component, via
-        /// `asin` of a clamped expression — clamp keeps the domain valid
-        /// near the poles. Read it together with `pitch`/`roll` to
-        /// round-trip `fromEuler`.
-        pub fn yaw(quaternion: anytype) @TypeOf(quaternion).value_type {
+/// `asin` of a clamped expression — clamp keeps the domain valid
+/// near the poles. Read it together with `pitch`/`roll` to
+/// round-trip `fromEuler`.
+pub fn yaw(quaternion: anytype) @TypeOf(quaternion).value_type {
     const scalar_type = @TypeOf(quaternion).value_type;
     const y = scalar.clamp(-@as(scalar_type, 2) * (quaternion.x * quaternion.z - quaternion.w * quaternion.y), -@as(scalar_type, 1), @as(scalar_type, 1));
     return scalar.asin(y);
 }
 
 /// Roll angle in radians (GLM `roll(qua)`): the Z-axis component, via
-        /// the same atan2 machinery as `pitch` (with its special case
-        /// returning 0 at the singularity).
-        pub fn roll(quaternion: anytype) @TypeOf(quaternion).value_type {
+/// the same atan2 machinery as `pitch` (with its special case
+/// returning 0 at the singularity).
+pub fn roll(quaternion: anytype) @TypeOf(quaternion).value_type {
     const scalar_type = @TypeOf(quaternion).value_type;
     const y = @as(scalar_type, 2) * (quaternion.x * quaternion.y + quaternion.w * quaternion.z);
     const x = quaternion.w * quaternion.w + quaternion.x * quaternion.x - quaternion.y * quaternion.y - quaternion.z * quaternion.z;
@@ -304,19 +304,19 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Euler angles as a vector (GLM `eulerAngles(qua)`): `(pitch, yaw,
-        /// roll)` in radians, exactly GLM's order. This is a lossy
-        /// extraction near gimbal-lock poses — for animation blending keep
-        /// the quaternion and use `slerp`.
-        pub fn eulerAngles(quaternion: anytype) Vec(3, @TypeOf(quaternion).value_type) {
+/// roll)` in radians, exactly GLM's order. This is a lossy
+/// extraction near gimbal-lock poses — for animation blending keep
+/// the quaternion and use `slerp`.
+pub fn eulerAngles(quaternion: anytype) Vec(3, @TypeOf(quaternion).value_type) {
     const scalar_type = @TypeOf(quaternion).value_type;
     return Vec(3, scalar_type).init(.{ pitch(quaternion), yaw(quaternion), roll(quaternion) });
 }
 
 /// Convert to a 3x3 rotation matrix (GLM `mat3_cast(qua)`): the standard
-        /// Rodríguez expansion of the quaternion. Use when a shader or
-        /// physics engine wants a matrix; the matrix columns are the
-        /// rotated basis axes, and it is orthogonal for unit inputs.
-        pub fn mat3_cast(quaternion: anytype) Mat(3, 3, @TypeOf(quaternion).value_type) {
+/// Rodríguez expansion of the quaternion. Use when a shader or
+/// physics engine wants a matrix; the matrix columns are the
+/// rotated basis axes, and it is orthogonal for unit inputs.
+pub fn mat3_cast(quaternion: anytype) Mat(3, 3, @TypeOf(quaternion).value_type) {
     const scalar_type = @TypeOf(quaternion).value_type;
     const qxx = quaternion.x * quaternion.x;
     const qyy = quaternion.y * quaternion.y;
@@ -337,20 +337,20 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Convert to a 4x4 rotation matrix (GLM `mat4_cast(qua)`): `mat3_cast`
-        /// embedded in the upper-left 3x3 of a homogeneous identity — the
-        /// usual way to feed a quaternion rotation into a transform
-        /// pipeline (after which `translate`/`scale` compose normally).
-        pub fn mat4_cast(quaternion: anytype) Mat(4, 4, @TypeOf(quaternion).value_type) {
+/// embedded in the upper-left 3x3 of a homogeneous identity — the
+/// usual way to feed a quaternion rotation into a transform
+/// pipeline (after which `translate`/`scale` compose normally).
+pub fn mat4_cast(quaternion: anytype) Mat(4, 4, @TypeOf(quaternion).value_type) {
     return mat3_cast(quaternion).toMat4();
 }
 
 /// Convert a 3x3 rotation matrix to a quaternion (GLM `quat_cast(mat3)`):
-        /// the Shepperd method — picks the largest diagonal term for
-        /// numerical stability (so it works even with noisy matrices),
-        /// and is the inverse of `mat3_cast` for proper rotations.
-        /// Mirrored/invalid matrices yield a quaternion representing the
-        /// nearest rotation.
-        pub fn quat_cast(matrix: anytype) Quat(@TypeOf(matrix).value_type) {
+/// the Shepperd method — picks the largest diagonal term for
+/// numerical stability (so it works even with noisy matrices),
+/// and is the inverse of `mat3_cast` for proper rotations.
+/// Mirrored/invalid matrices yield a quaternion representing the
+/// nearest rotation.
+pub fn quat_cast(matrix: anytype) Quat(@TypeOf(matrix).value_type) {
     const scalar_type = @TypeOf(matrix).value_type;
     const fourXSquaredMinus1 = matrix.data[0].v[0] - matrix.data[1].v[1] - matrix.data[2].v[2];
     const fourYSquaredMinus1 = matrix.data[1].v[1] - matrix.data[0].v[0] - matrix.data[2].v[2];
@@ -406,11 +406,11 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Convert a 4x4 matrix's rotation to a quaternion (GLM `quat_cast(mat4)`):
-        /// extracts the upper-left 3x3 and delegates to `quat_cast` —
-        /// translation, scale and the fourth column are ignored, so scale
-        /// the matrix's linear part first (or use `affineInverse`-style
-        /// decomposition) for non-rigid transforms.
-        pub fn quat_cast4(matrix: anytype) Quat(@TypeOf(matrix).value_type) {
+/// extracts the upper-left 3x3 and delegates to `quat_cast` —
+/// translation, scale and the fourth column are ignored, so scale
+/// the matrix's linear part first (or use `affineInverse`-style
+/// decomposition) for non-rigid transforms.
+pub fn quat_cast4(matrix: anytype) Quat(@TypeOf(matrix).value_type) {
     const scalar_type = @TypeOf(matrix).value_type;
     const V3 = Vec(3, scalar_type);
     const m3 = Mat(3, 3, scalar_type).init(.{
@@ -422,10 +422,10 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Append a rotation: `q * angleAxis(angle, normalize(axis))` (GLM
-        /// `rotate(qua, angle, axis)`). The axis is normalized on the fly
-        /// (only if it drifted by more than 0.001 from unit length, per
-        /// GLM), so passing a near-unit axis is fine.
-        pub fn rotate(quaternion: anytype, angleRad: anytype, axisVec: Vec(3, @TypeOf(quaternion).value_type)) @TypeOf(quaternion) {
+/// `rotate(qua, angle, axis)`). The axis is normalized on the fly
+/// (only if it drifted by more than 0.001 from unit length, per
+/// GLM), so passing a near-unit axis is fine.
+pub fn rotate(quaternion: anytype, angleRad: anytype, axisVec: Vec(3, @TypeOf(quaternion).value_type)) @TypeOf(quaternion) {
     const scalar_type = @TypeOf(quaternion).value_type;
     var tmp = axisVec;
     const norm = tmp.length();
@@ -437,11 +437,11 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// GLM `mix(qua, qua, a)`: component-wise `x·(1−a) + y·a` for near
-        /// parallel quaternions, otherwise a linear interpolation of the
-        /// sine components (a velocity-preserving variant of `slerp` that
-        /// does NOT normalize). Feed `a` in [0, 1] and normalize the
-        /// result if you need a proper rotation.
-        pub fn mix(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type) @TypeOf(left_hand_side) {
+/// parallel quaternions, otherwise a linear interpolation of the
+/// sine components (a velocity-preserving variant of `slerp` that
+/// does NOT normalize). Feed `factor` in [0, 1] and normalize the
+/// result if you need a proper rotation.
+pub fn mix(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type) @TypeOf(left_hand_side) {
     const scalar_type = @TypeOf(left_hand_side).value_type;
     const Q = @TypeOf(left_hand_side);
     const cosTheta = left_hand_side.dot(right_hand_side);
@@ -453,21 +453,21 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Linear interpolation (GLM `lerp`): plain `x·(1−a) + y·a` without
-        /// normalization or short-arc handling — the fastest blend, but
-        /// the magnitude shrinks mid-path and the path is not constant
-        /// speed. For animation use `slerp`; for tiny increments `lerp`
-        /// is fine.
-        pub fn lerp(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type) @TypeOf(left_hand_side) {
+/// normalization or short-arc handling — the fastest blend, but
+/// the magnitude shrinks mid-path and the path is not constant
+/// speed. For animation use `slerp`; for tiny increments `lerp`
+/// is fine.
+pub fn lerp(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type) @TypeOf(left_hand_side) {
     const scalar_type = @TypeOf(left_hand_side).value_type;
     return left_hand_side.mulScalar(@as(scalar_type, 1) - factor).add(right_hand_side.mulScalar(factor));
 }
 
 /// Spherical linear interpolation (GLM `slerp(qua, qua, a)`): the
-        /// constant-angular-speed shortest path between the two rotations.
-        /// Flips `y` when the dot product is negative (short arc) and
-        /// falls back to `mix` when parallel. THE standard animation and
-        /// camera blend; normalize `x`/`y` first for exactness.
-        pub fn slerp(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type) @TypeOf(left_hand_side) {
+/// constant-angular-speed shortest path between the two rotations.
+/// Flips `right_hand_side` when the dot product is negative (short arc) and
+/// falls back to `mix` when parallel. THE standard animation and
+/// camera blend; normalize `left_hand_side`/`right_hand_side` first for exactness.
+pub fn slerp(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type) @TypeOf(left_hand_side) {
     const scalar_type = @TypeOf(left_hand_side).value_type;
     const Q = @TypeOf(left_hand_side);
     var z = right_hand_side;
@@ -483,11 +483,11 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
     return left_hand_side.mulScalar(scalar.sin((@as(scalar_type, 1) - factor) * angleRad)).add(z.mulScalar(scalar.sin(factor * angleRad))).divScalar(scalar.sin(angleRad));
 }
 
-/// Slerp with an extra spin parameter `k` (GLM `slerp(qua, qua, a, k)`,
-        /// per Graphics Gems III): the phase advances by `angle + k·π`,
-        /// so `k = 1` forces a full extra half-turn along the path. Use
-        /// for stylized barrel-roll interpolation that `slerp` cannot do.
-        pub fn slerpSpin(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type, spin_count: anytype) @TypeOf(left_hand_side) {
+/// Slerp with an extra spin parameter `spin_count` (GLM `slerp(qua, qua, a, k)`,
+/// per Graphics Gems III): the phase advances by `angle + spin_count·π`,
+/// so `spin_count = 1` forces a full extra half-turn along the path. Use
+/// for stylized barrel-roll interpolation that `slerp` cannot do.
+pub fn slerpSpin(left_hand_side: anytype, right_hand_side: anytype, factor: @TypeOf(left_hand_side).value_type, spin_count: anytype) @TypeOf(left_hand_side) {
     const scalar_type = @TypeOf(left_hand_side).value_type;
     const Q = @TypeOf(left_hand_side);
     var z = right_hand_side;
@@ -505,11 +505,11 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Quaternion exponential (GLM `exp(qua)`, ext/quaternion_exponential):
-        /// the analog of `exp` for rotations — `exp(0, 0, 0, θ)·axis` turns
-        /// the axis-angle form into a quaternion:
-        /// `exp({0, axis·θ}) = angleAxis(2θ, axis)`. Zero vector part
-        /// yields the identity (as e^0).
-        pub fn exp(quaternion: anytype) @TypeOf(quaternion) {
+/// the analog of `exp` for rotations — `exp(0, 0, 0, θ)·axis` turns
+/// the axis-angle form into a quaternion:
+/// `exp({0, axis·θ}) = angleAxis(2θ, axis)`. Zero vector part
+/// yields the identity (as e^0).
+pub fn exp(quaternion: anytype) @TypeOf(quaternion) {
     const scalar_type = @TypeOf(quaternion).value_type;
     const Q = @TypeOf(quaternion);
     const u = Vec(3, scalar_type).init(.{ quaternion.x, quaternion.y, quaternion.z });
@@ -520,12 +520,12 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Quaternion logarithm (GLM `log(qua)`, ext/quaternion_exponential):
-        /// the inverse of `exp` — maps a rotation back to its
-        /// axis-scaled-angle form `(0, axis·θ)`, logging the magnitude on
-        /// top. The w < 0 branch maps to the +x axis with angle π (the
-        /// antipodal quaternion) and the degenerate zero quaternion maps
-        /// to infinities, matching GLM exactly.
-        pub fn log(quaternion: anytype) @TypeOf(quaternion) {
+/// the inverse of `exp` — maps a rotation back to its
+/// axis-scaled-angle form `(0, axis·θ)`, logging the magnitude on
+/// top. The w < 0 branch maps to the +x axis with angle π (the
+/// antipodal quaternion) and the degenerate zero quaternion maps
+/// to infinities, matching GLM exactly.
+pub fn log(quaternion: anytype) @TypeOf(quaternion) {
     const scalar_type = @TypeOf(quaternion).value_type;
     const Q = @TypeOf(quaternion);
     const u = Vec(3, scalar_type).init(.{ quaternion.x, quaternion.y, quaternion.z });
@@ -541,12 +541,12 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Quaternion power (GLM `pow(qua, y)`, ext/quaternion_exponential):
-        /// `exp(y · log(q))`. For unit quaternions this scales the
-        /// rotation angle by `y` — `pow(q, 0.5)` is the square root
-        /// rotation. Near the identity (|w|/|q| > cos(0.5), i.e. rotation
-        /// angles below one radian) it switches to a numerically stable
-        /// asin-based branch, and `y ≈ 0` short-circuits to the identity.
-        pub fn pow(base: anytype, exponent: @TypeOf(base).value_type) @TypeOf(base) {
+/// `exp(y · log(q))`. For unit quaternions this scales the
+/// rotation angle by `exponent` — `pow(q, 0.5)` is the square root
+/// rotation. Near the identity (|w|/|q| > cos(0.5), i.e. rotation
+/// angles below one radian) it switches to a numerically stable
+/// asin-based branch, and `exponent ≈ 0` short-circuits to the identity.
+pub fn pow(base: anytype, exponent: @TypeOf(base).value_type) @TypeOf(base) {
     const scalar_type = @TypeOf(base).value_type;
     const Q = @TypeOf(base);
     const eps = std.math.floatEps(scalar_type);
@@ -569,25 +569,25 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Square root of the rotation (GLM `sqrt(qua)`): `pow(q, 0.5)` — the
-        /// half-angle quaternion, e.g. to split a single keyframe rotation
-        /// into two identical steps for an animation curve.
-        pub fn sqrt(quaternion: anytype) @TypeOf(quaternion) {
+/// half-angle quaternion, e.g. to split a single keyframe rotation
+/// into two identical steps for an animation curve.
+pub fn sqrt(quaternion: anytype) @TypeOf(quaternion) {
     return pow(quaternion, @as(@TypeOf(quaternion).value_type, 0.5));
 }
 
 /// Exact component equality as a 4-bool vector (GLM `equal(qua, qua)`,
-        /// ext/quaternion_relational): lanes are true where components
-        /// are bitwise equal. Two quaternions negated represent the same
-        /// rotation — compare via `dot(x, y).abs() > 1 - eps` instead if
-        /// you mean "same orientation".
-        pub fn equal(left_hand_side: anytype, right_hand_side: anytype) Vec(4, bool) {
+/// ext/quaternion_relational): lanes are true where components
+/// are bitwise equal. Two quaternions negated represent the same
+/// rotation — compare via `dot(x, y).abs() > 1 - eps` instead if
+/// you mean "same orientation".
+pub fn equal(left_hand_side: anytype, right_hand_side: anytype) Vec(4, bool) {
     return Vec(4, bool).init(.{ left_hand_side.x == right_hand_side.x, left_hand_side.y == right_hand_side.y, left_hand_side.z == right_hand_side.z, left_hand_side.w == right_hand_side.w });
 }
 
 /// Tolerance equality (GLM `equal(qua, qua, eps)`): lane true iff
-        /// `|xᵢ − yᵢ| < eps`. Use for "same orientation within ε" checks
-        /// after `slerp`-driven animation settles.
-        pub fn equalEps(left_hand_side: anytype, right_hand_side: anytype, epsilon: @TypeOf(left_hand_side).value_type) Vec(4, bool) {
+/// `|xᵢ − yᵢ| < eps`. Use for "same orientation within ε" checks
+/// after `slerp`-driven animation settles.
+pub fn equalEps(left_hand_side: anytype, right_hand_side: anytype, epsilon: @TypeOf(left_hand_side).value_type) Vec(4, bool) {
     const scalar_type = @TypeOf(left_hand_side).value_type;
     const v = Vec(4, scalar_type).init(.{ left_hand_side.x - right_hand_side.x, left_hand_side.y - right_hand_side.y, left_hand_side.z - right_hand_side.z, left_hand_side.w - right_hand_side.w });
     return Vec(4, bool).init(.{
@@ -599,14 +599,14 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Exact component inequality as a 4-bool vector (GLM `notEqual(qua,
-        /// qua)`); the negation of `equal`.
-        pub fn notEqual(left_hand_side: anytype, right_hand_side: anytype) Vec(4, bool) {
+/// qua)`); the negation of `equal`.
+pub fn notEqual(left_hand_side: anytype, right_hand_side: anytype) Vec(4, bool) {
     return Vec(4, bool).init(.{ left_hand_side.x != right_hand_side.x, left_hand_side.y != right_hand_side.y, left_hand_side.z != right_hand_side.z, left_hand_side.w != right_hand_side.w });
 }
 
 /// Tolerance inequality (GLM `notEqual(qua, qua, eps)`): lane true iff
-        /// `|xᵢ − yᵢ| ≥ eps`; the negation of `equalEps`.
-        pub fn notEqualEps(left_hand_side: anytype, right_hand_side: anytype, epsilon: @TypeOf(left_hand_side).value_type) Vec(4, bool) {
+/// `|xᵢ − yᵢ| ≥ eps`; the negation of `equalEps`.
+pub fn notEqualEps(left_hand_side: anytype, right_hand_side: anytype, epsilon: @TypeOf(left_hand_side).value_type) Vec(4, bool) {
     const scalar_type = @TypeOf(left_hand_side).value_type;
     const v = Vec(4, scalar_type).init(.{ left_hand_side.x - right_hand_side.x, left_hand_side.y - right_hand_side.y, left_hand_side.z - right_hand_side.z, left_hand_side.w - right_hand_side.w });
     return Vec(4, bool).init(.{
@@ -618,26 +618,26 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Per-component NaN test (GLM `isnan(qua)`, ext/quaternion_common) as a
-        /// bool vector — combine with `.any()` to detect invalid
-        /// orientations (e.g. from dividing by a zero-length axis) during
-        /// simulation debug.
-        pub fn isnan(quaternion: anytype) Vec(4, bool) {
+/// bool vector — combine with `.any()` to detect invalid
+/// orientations (e.g. from dividing by a zero-length axis) during
+/// simulation debug.
+pub fn isnan(quaternion: anytype) Vec(4, bool) {
     return Vec(4, bool).init(.{ std.math.isNan(quaternion.x), std.math.isNan(quaternion.y), std.math.isNan(quaternion.z), std.math.isNan(quaternion.w) });
 }
 
 /// Per-component infinity test (GLM `isinf(qua)`) as a bool vector —
-        /// flag quaternions corrupted by `log` of the zero quaternion or
-        /// by exploding interpolations.
-        pub fn isinf(quaternion: anytype) Vec(4, bool) {
+/// flag quaternions corrupted by `log` of the zero quaternion or
+/// by exploding interpolations.
+pub fn isinf(quaternion: anytype) Vec(4, bool) {
     return Vec(4, bool).init(.{ std.math.isInf(quaternion.x), std.math.isInf(quaternion.y), std.math.isInf(quaternion.z), std.math.isInf(quaternion.w) });
 }
 
 /// Right-handed look-at orientation (GLM `quatLookAtRH(direction, up)`,
-        /// gtc/quaternion): the quaternion that rotates the −z axis to
-        /// point along `direction` — the rotation part of `lookAt`.
-        /// Degenerate `direction ∥ up` cases are guarded by clamping the
-        /// side-vector length instead of normalizing by zero.
-        pub fn quatLookAtRH(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
+/// gtc/quaternion): the quaternion that rotates the −z axis to
+/// point along `direction` — the rotation part of `lookAt`.
+/// Degenerate `direction ∥ up` cases are guarded by clamping the
+/// side-vector length instead of normalizing by zero.
+pub fn quatLookAtRH(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
     const scalar_type = @TypeOf(direction).value_type;
     const c2 = direction.neg();
     const right = up.cross(c2);
@@ -647,9 +647,9 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Left-handed look-at orientation (GLM `quatLookAtLH(direction, up)`,
-        /// gtc/quaternion): the twin of `quatLookAtRH` that aligns the +z
-        /// axis with `direction` — for engines where forward is +z.
-        pub fn quatLookAtLH(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
+/// gtc/quaternion): the twin of `quatLookAtRH` that aligns the +z
+/// axis with `direction` — for engines where forward is +z.
+pub fn quatLookAtLH(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
     const scalar_type = @TypeOf(direction).value_type;
     const c2 = direction;
     const right = up.cross(c2);
@@ -659,8 +659,8 @@ pub fn angleAxis(angleRad: anytype, axisVec: Vec(3, scalar.rtType(@TypeOf(angleR
 }
 
 /// Look-at orientation default (GLM `quatLookAt`): right-handed, for
-        /// parity with how this project's `lookAt` defaults; change to
-        /// `quatLookAtLH` if your convention is left-handed.
-        pub fn quatLookAt(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
+/// parity with how this project's `lookAt` defaults; change to
+/// `quatLookAtLH` if your convention is left-handed.
+pub fn quatLookAt(direction: anytype, up: anytype) Quat(@TypeOf(direction).value_type) {
     return quatLookAtRH(direction, up);
 }
