@@ -107,8 +107,6 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         // ---- accessors ----
 
         /// Read element at (column `col_index`, row `row_index`), 0-based, runtime indices.
-        /// Prefer `col(i).v[r]` directly for hot paths — it compiles to a
-        /// lane load without the extra call.
         pub inline fn get(self: Self, col_index: usize, row_index: usize) scalar_type {
             return self.data[col_index].v[row_index];
         }

@@ -757,14 +757,12 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         }
 
         /// Component-wise inverse square root (GLM `inversesqrt`):
-        /// `1/sqrt(x)`. Cheaper to compute than a division by `sqrt` and
-        /// used by vector normalization (see `normalize`). Undefined for
-        /// x ≤ 0.
+        /// `1/sqrt(x)` per component, computed simply as a division by
+        /// `sqrt`; used by vector normalization (see `normalize`).
+        /// Undefined for inputs below zero (NaN).
         pub inline fn inversesqrt(self: Self) Self {
             return self.apply(scalar.inversesqrt);
         }
-
-        // ---- geometric ----
 
         // ---- geometric ----
 
@@ -1441,8 +1439,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         // ---- reductions ----
 
         /// Sum of all components (GLM `compAdd`, GLSL `compAdd`): a scalar.
-        /// For dot products use `dot`, which is the same without the extra
-        /// allocation.
+        /// This is the same reduction `dot` applies to the component products.
         pub inline fn compAdd(self: Self) scalar_type {
             return @reduce(.Add, self.v);
         }

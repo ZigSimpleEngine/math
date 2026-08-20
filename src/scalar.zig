@@ -377,15 +377,14 @@ pub fn log2(value: anytype) @TypeOf(value) {
     return @log2(value);
 }
 
-/// Square root, defined for `value >= 0`. Use for distances/lengths; the
-/// dedicated `length()`/`normalize()` paths are faster.
+/// Square root, defined for `value >= 0`. Use for distances and lengths.
 pub fn sqrt(value: anytype) @TypeOf(value) {
     return @sqrt(value);
 }
 
-/// Reciprocal square root `1/sqrt(x)`. Cheaper than `1/sqrt(x)` on most
-/// hardware; the classic way to normalize vectors when you have the squared
-/// length already.
+/// Reciprocal square root: `1/sqrt(value)`, computed as a division by `sqrt`.
+/// The classic way to normalize a vector when you have its squared length
+/// already.
 pub fn inversesqrt(value: anytype) @TypeOf(value) {
     return @as(@TypeOf(value), 1) / @sqrt(value);
 }
@@ -487,7 +486,7 @@ pub fn compAdd(value: anytype) @TypeOf(value) {
 
 // ---- ext/scalar_common ----
 
-/// Smallest of three values — avoids nested `min` calls.
+/// Smallest of three values: the result of two nested `min` calls.
 pub fn min3(value1: anytype, value2: anytype, value3: anytype) @TypeOf(value1, value2, value3) {
     return min(min(value1, value2), value3);
 }
