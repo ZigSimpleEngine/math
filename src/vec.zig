@@ -326,11 +326,21 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = self.v + @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
         }
 
+        /// In-place component-wise addition; `self` is overwritten with `add`.
+        pub inline fn addSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.add(right_hand_side);
+        }
+
         /// Component-wise subtraction. `right_hand_side` may be a vector or a scalar:
         /// `a.sub(b)` == GLSL `a - b`. Use for displacement between points.
         pub inline fn sub(self: Self, right_hand_side: anytype) Self {
             if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v - right_hand_side.v };
             return .{ .v = self.v - @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
+        }
+
+        /// In-place component-wise subtraction; `self` is overwritten with `sub`.
+        pub inline fn subSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.sub(right_hand_side);
         }
 
         /// Component-wise multiplication. `right_hand_side` may be a vector (Hadamard
@@ -341,15 +351,30 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = self.v * @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
         }
 
+        /// In-place component-wise multiplication; `self` is overwritten with `mul`.
+        pub inline fn mulSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.mul(right_hand_side);
+        }
+
         /// Component-wise division. `right_hand_side` may be a vector or a scalar.
         pub inline fn div(self: Self, right_hand_side: anytype) Self {
             if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v / right_hand_side.v };
             return .{ .v = self.v / @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
         }
 
+        /// In-place component-wise division; `self` is overwritten with `div`.
+        pub inline fn divSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.div(right_hand_side);
+        }
+
         /// Negate every component: `v.neg()` == GLSL `-v`.
         pub inline fn neg(self: Self) Self {
             return .{ .v = -self.v };
+        }
+
+        /// In-place negation; `self` is overwritten with `neg`.
+        pub inline fn negSelf(self: *Self) void {
+            self.* = self.neg();
         }
 
         /// Component-wise modulo (GLSL `mod(x, y)`, floored, sign follows
@@ -359,11 +384,21 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply2(right_hand_side, scalar.mod);
         }
 
+        /// In-place component-wise modulo; `self` is overwritten with `mod`.
+        pub inline fn modSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.mod(right_hand_side);
+        }
+
         /// Component-wise reciprocal (GLM `inverse(vec)`): `1/x` per lane,
         /// computed via a single SIMD division. Use on a `1/d` precomputed
         /// vector, not on matrices (that is `mat.inverse()`).
         pub inline fn inverse(self: Self) Self {
             return .{ .v = @as(storage_type, @splat(scalar.cast(scalar_type, 1))) / self.v };
+        }
+
+        /// In-place component-wise reciprocal; `self` is overwritten with `inverse`.
+        pub inline fn inverseSelf(self: *Self) void {
+            self.* = self.inverse();
         }
 
         // ---- relational ----
@@ -443,10 +478,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.abs);
         }
 
+        /// In-place component-wise absolute value; `self` is overwritten with `abs`.
+        pub inline fn absSelf(self: *Self) void {
+            self.* = self.abs();
+        }
+
         /// Component-wise sign (GLM `sign`): -1 / 0 / +1 per lane, sign of
         /// 0 is 0 and NaN yields NaN. See `scalar.sign` for the exact rules.
         pub inline fn sign(self: Self) Self {
             return self.apply(scalar.sign);
+        }
+
+        /// In-place component-wise sign; `self` is overwritten with `sign`.
+        pub inline fn signSelf(self: *Self) void {
+            self.* = self.sign();
         }
 
         /// Component-wise floor (GLM `floor`): largest integer ≤ value,
@@ -455,9 +500,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.floor);
         }
 
+        /// In-place component-wise floor; `self` is overwritten with `floor`.
+        pub inline fn floorSelf(self: *Self) void {
+            self.* = self.floor();
+        }
+
         /// Component-wise ceil (GLM `ceil`): smallest integer ≥ value.
         pub inline fn ceil(self: Self) Self {
             return self.apply(scalar.ceil);
+        }
+
+        /// In-place component-wise ceil; `self` is overwritten with `ceil`.
+        pub inline fn ceilSelf(self: *Self) void {
+            self.* = self.ceil();
         }
 
         /// Component-wise rounding away from zero (GLM `round`): 2.5 → 3,
@@ -466,16 +521,31 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.round);
         }
 
+        /// In-place component-wise round; `self` is overwritten with `round`.
+        pub inline fn roundSelf(self: *Self) void {
+            self.* = self.round();
+        }
+
         /// Component-wise round-half-to-even (GLM `roundEven`): 2.5 → 2,
         /// 3.5 → 4. Use when dividing into pairs/groups to avoid bias.
         pub inline fn roundEven(self: Self) Self {
             return self.apply(scalar.roundEven);
         }
 
+        /// In-place component-wise round-half-to-even; `self` is overwritten with `roundEven`.
+        pub inline fn roundEvenSelf(self: *Self) void {
+            self.* = self.roundEven();
+        }
+
         /// Component-wise truncation toward zero (GLM `trunc`): fractional
         /// part is dropped. `trunc(-1.7) == -1`.
         pub inline fn trunc(self: Self) Self {
             return self.apply(scalar.trunc);
+        }
+
+        /// In-place component-wise truncation; `self` is overwritten with `trunc`.
+        pub inline fn truncSelf(self: *Self) void {
+            self.* = self.trunc();
         }
 
         /// Component-wise fractional part (GLM `fract`): `x - floor(x)`, so
@@ -485,6 +555,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.fract);
         }
 
+        /// In-place component-wise fractional part; `self` is overwritten with `fract`.
+        pub inline fn fractSelf(self: *Self) void {
+            self.* = self.fract();
+        }
+
         /// Component-wise minimum (GLM `min`). `right_hand_side` may be a vector or a
         /// scalar: `pos.clamp(0, size)` takes vectors, `v.max(0)` clamps a
         /// side. NaN handling matches `scalar.min`.
@@ -492,9 +567,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply2(right_hand_side, scalar.min);
         }
 
+        /// In-place component-wise minimum; `self` is overwritten with `min`.
+        pub inline fn minSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.min(right_hand_side);
+        }
+
         /// Component-wise maximum (GLM `max`).
         pub inline fn max(self: Self, right_hand_side: anytype) Self {
             return self.apply2(right_hand_side, scalar.max);
+        }
+
+        /// In-place component-wise maximum; `self` is overwritten with `max`.
+        pub inline fn maxSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.max(right_hand_side);
         }
 
         /// Component-wise clamp into [`min_val`, `max_val`] (GLM `clamp`). `min_val`/`max_val` may
@@ -502,6 +587,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// from GLSL: this is `clamp(value, min_val, max_val)`.
         pub inline fn clamp(self: Self, min_val: anytype, max_val: anytype) Self {
             return self.apply3(min_val, max_val, clampHelper);
+        }
+
+        /// In-place component-wise clamp; `self` is overwritten with `clamp`.
+        pub inline fn clampSelf(self: *Self, min_val: anytype, max_val: anytype) void {
+            self.* = self.clamp(min_val, max_val);
         }
 
         fn clampHelper(min_val: anytype, max_val: anytype, value: anytype) @TypeOf(value) {
@@ -531,6 +621,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        /// In-place linear interpolation; `self` is overwritten with `mix`.
+        pub inline fn mixSelf(self: *Self, right_hand_side: anytype, factor: anytype) void {
+            self.* = self.mix(right_hand_side, factor);
+        }
+
         /// Per-component step function (GLM `step(edge, self)`): 0 where the
         /// receiver is below `edge`, 1 otherwise — i.e. `x >= edge ? 1 : 0`.
         /// Classic use: gate a value by a threshold. `edge` may be vector or
@@ -546,11 +641,21 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        /// In-place per-component step function; `self` is overwritten with `step`.
+        pub inline fn stepSelf(self: *Self, edge: anytype) void {
+            self.* = self.step(edge);
+        }
+
         /// Per-component smoothstep (GLM `smoothstep(e0, e1, self)`): 0 at
         /// `edge0`, 1 at `edge1` with a Hermite (2t³−3t²) ramp in between. Ideal
         /// for easing transitions; where t leaves [`edge0`, `edge1`] the result clamps.
         pub inline fn smoothstep(self: Self, edge0: anytype, edge1: anytype) Self {
             return self.apply3(edge0, edge1, scalar.smoothstep);
+        }
+
+        /// In-place per-component smoothstep; `self` is overwritten with `smoothstep`.
+        pub inline fn smoothstepSelf(self: *Self, edge0: anytype, edge1: anytype) void {
+            self.* = self.smoothstep(edge0, edge1);
         }
 
         /// Component-wise fused multiply-add: `self·right_hand_side + addend` with a single
@@ -562,6 +667,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             if (comptime isVec(RT) and isVec(CT))
                 return .{ .v = @mulAdd(storage_type, self.v, right_hand_side.v, addend.v) };
             return self.apply3(right_hand_side, addend, scalar.fma);
+        }
+
+        /// In-place fused multiply-add; `self` is overwritten with `fma`.
+        pub inline fn fmaSelf(self: *Self, right_hand_side: anytype, addend: anytype) void {
+            self.* = self.fma(right_hand_side, addend);
         }
 
         /// Split each component into fractional and integral parts
@@ -635,9 +745,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.radians);
         }
 
+        /// In-place degrees→radians conversion; `self` is overwritten with `radians`.
+        pub inline fn radiansSelf(self: *Self) void {
+            self.* = self.radians();
+        }
+
         /// Convert radians to degrees (GLM `degrees`): `x · 180/π`.
         pub inline fn degrees(self: Self) Self {
             return self.apply(scalar.degrees);
+        }
+
+        /// In-place radians→degrees conversion; `self` is overwritten with `degrees`.
+        pub inline fn degreesSelf(self: *Self) void {
+            self.* = self.degrees();
         }
 
         /// Per-component sine (GLM `sin`); the argument is in radians.
@@ -647,14 +767,29 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.sin);
         }
 
+        /// In-place per-component sine; `self` is overwritten with `sin`.
+        pub inline fn sinSelf(self: *Self) void {
+            self.* = self.sin();
+        }
+
         /// Per-component cosine (GLM `cos`); argument in radians.
         pub inline fn cos(self: Self) Self {
             return self.apply(scalar.cos);
         }
 
+        /// In-place per-component cosine; `self` is overwritten with `cos`.
+        pub inline fn cosSelf(self: *Self) void {
+            self.* = self.cos();
+        }
+
         /// Per-component tangent (GLM `tan`); argument in radians.
         pub inline fn tan(self: Self) Self {
             return self.apply(scalar.tan);
+        }
+
+        /// In-place per-component tangent; `self` is overwritten with `tan`.
+        pub inline fn tanSelf(self: *Self) void {
+            self.* = self.tan();
         }
 
         /// Per-component arc sine (GLM `asin`): result in [-π/2, π/2].
@@ -663,15 +798,30 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.asin);
         }
 
+        /// In-place per-component arc sine; `self` is overwritten with `asin`.
+        pub inline fn asinSelf(self: *Self) void {
+            self.* = self.asin();
+        }
+
         /// Per-component arc cosine (GLM `acos`): result in [0, π].
         /// Undefined outside the domain [-1, 1].
         pub inline fn acos(self: Self) Self {
             return self.apply(scalar.acos);
         }
 
+        /// In-place per-component arc cosine; `self` is overwritten with `acos`.
+        pub inline fn acosSelf(self: *Self) void {
+            self.* = self.acos();
+        }
+
         /// Per-component arc tangent (GLM `atan`): result in [-π/2, π/2].
         pub inline fn atan(self: Self) Self {
             return self.apply(scalar.atan);
+        }
+
+        /// In-place per-component arc tangent; `self` is overwritten with `atan`.
+        pub inline fn atanSelf(self: *Self) void {
+            self.* = self.atan();
         }
 
         /// Per-component atan2 (GLM `atan(self, right_hand_side)`, i.e. the receiver is
@@ -682,15 +832,30 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply2(right_hand_side, scalar.atan2);
         }
 
+        /// In-place per-component atan2; `self` is overwritten with `atan2`.
+        pub inline fn atan2Self(self: *Self, right_hand_side: anytype) void {
+            self.* = self.atan2(right_hand_side);
+        }
+
         /// Per-component hyperbolic sine (GLM `sinh`). Use for catenary
         /// curves and smooth monotone growth.
         pub inline fn sinh(self: Self) Self {
             return self.apply(scalar.sinh);
         }
 
+        /// In-place per-component hyperbolic sine; `self` is overwritten with `sinh`.
+        pub inline fn sinhSelf(self: *Self) void {
+            self.* = self.sinh();
+        }
+
         /// Per-component hyperbolic cosine (GLM `cosh`).
         pub inline fn cosh(self: Self) Self {
             return self.apply(scalar.cosh);
+        }
+
+        /// In-place per-component hyperbolic cosine; `self` is overwritten with `cosh`.
+        pub inline fn coshSelf(self: *Self) void {
+            self.* = self.cosh();
         }
 
         /// Per-component hyperbolic tangent (GLM `tanh`): saturating
@@ -699,9 +864,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.tanh);
         }
 
+        /// In-place per-component hyperbolic tangent; `self` is overwritten with `tanh`.
+        pub inline fn tanhSelf(self: *Self) void {
+            self.* = self.tanh();
+        }
+
         /// Per-component inverse hyperbolic sine (GLM `asinh`).
         pub inline fn asinh(self: Self) Self {
             return self.apply(scalar.asinh);
+        }
+
+        /// In-place per-component inverse hyperbolic sine; `self` is overwritten with `asinh`.
+        pub inline fn asinhSelf(self: *Self) void {
+            self.* = self.asinh();
         }
 
         /// Per-component inverse hyperbolic cosine (GLM `acosh`); domain
@@ -710,10 +885,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.acosh);
         }
 
+        /// In-place per-component inverse hyperbolic cosine; `self` is overwritten with `acosh`.
+        pub inline fn acoshSelf(self: *Self) void {
+            self.* = self.acosh();
+        }
+
         /// Per-component inverse hyperbolic tangent (GLM `atanh`); domain
         /// (-1, 1).
         pub inline fn atanh(self: Self) Self {
             return self.apply(scalar.atanh);
+        }
+
+        /// In-place per-component inverse hyperbolic tangent; `self` is overwritten with `atanh`.
+        pub inline fn atanhSelf(self: *Self) void {
+            self.* = self.atanh();
         }
 
         // ---- exponential ----
@@ -725,10 +910,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply2(right_hand_side, scalar.pow);
         }
 
+        /// In-place component-wise power; `self` is overwritten with `pow`.
+        pub inline fn powSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.pow(right_hand_side);
+        }
+
         /// Component-wise natural exponent (GLM `exp`): `e^x`.
         /// The inverse of `log`.
         pub inline fn exp(self: Self) Self {
             return self.apply(scalar.exp);
+        }
+
+        /// In-place component-wise natural exponent; `self` is overwritten with `exp`.
+        pub inline fn expSelf(self: *Self) void {
+            self.* = self.exp();
         }
 
         /// Component-wise base-2 exponent (GLM `exp2`): `2^x`. This is the
@@ -738,10 +933,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.exp2);
         }
 
+        /// In-place component-wise base-2 exponent; `self` is overwritten with `exp2`.
+        pub inline fn exp2Self(self: *Self) void {
+            self.* = self.exp2();
+        }
+
         /// Component-wise natural logarithm (GLM `log`); undefined for
         /// x ≤ 0 (NaN/±inf, see `scalar.log`).
         pub inline fn log(self: Self) Self {
             return self.apply(scalar.log);
+        }
+
+        /// In-place component-wise natural logarithm; `self` is overwritten with `log`.
+        pub inline fn logSelf(self: *Self) void {
+            self.* = self.log();
         }
 
         /// Component-wise base-2 logarithm (GLM `log2`); undefined for
@@ -750,10 +955,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.log2);
         }
 
+        /// In-place component-wise base-2 logarithm; `self` is overwritten with `log2`.
+        pub inline fn log2Self(self: *Self) void {
+            self.* = self.log2();
+        }
+
         /// Component-wise square root (GLM `sqrt`); undefined (NaN) for
         /// negative inputs.
         pub inline fn sqrt(self: Self) Self {
             return self.apply(scalar.sqrt);
+        }
+
+        /// In-place component-wise square root; `self` is overwritten with `sqrt`.
+        pub inline fn sqrtSelf(self: *Self) void {
+            self.* = self.sqrt();
         }
 
         /// Component-wise inverse square root (GLM `inversesqrt`):
@@ -762,6 +977,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// Undefined for inputs below zero (NaN).
         pub inline fn inversesqrt(self: Self) Self {
             return self.apply(scalar.inversesqrt);
+        }
+
+        /// In-place component-wise inverse square root; `self` is overwritten with `inversesqrt`.
+        pub inline fn inversesqrtSelf(self: *Self) void {
+            self.* = self.inversesqrt();
         }
 
         // ---- geometric ----
@@ -803,6 +1023,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             } };
         }
 
+        /// In-place cross product (3D only); `self` is overwritten with `cross`.
+        pub fn crossSelf(self: *Self, right_hand_side: Self) void {
+            self.* = self.cross(right_hand_side);
+        }
+
         /// Unit vector in the same direction (GLM `normalize`):
         /// `v / |v|`. Zero vectors stay zero; returns a float vector even
         /// for int inputs. Use on directions before `dot`/`cross` so that
@@ -817,6 +1042,12 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = c * @as(@Vector(component_count, float_type), @splat(is)) };
         }
 
+        /// In-place renormalization to unit length; `self` is overwritten with
+        /// `normalize`. Only valid when the vector's scalar type is floating-point.
+        pub inline fn normalizeSelf(self: *Self) void {
+            self.* = self.normalize();
+        }
+
         /// Orient a normal `self` away from a reference direction (GLM
         /// `faceforward(N, I, Nref)`): returns `self` if `I·Nref < 0`,
         /// otherwise `-self`. For example, flip a surface normal so it
@@ -825,11 +1056,21 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return if (normal_ref.dot(incident) < 0) self else self.neg();
         }
 
+        /// In-place face-forward orientation; `self` is overwritten with `faceforward`.
+        pub inline fn faceforwardSelf(self: *Self, incident: Self, normal_ref: Self) void {
+            self.* = self.faceforward(incident, normal_ref);
+        }
+
         /// Reflect an incident vector `self` about a normal `normal` (GLM
         /// `reflect(I, N)`): `I - 2·(I·N)·N`. `normal` should be normalized;
         /// result is the mirror of `self` across the plane with normal `normal`.
         pub inline fn reflect(self: Self, normal: Self) Self {
             return self.sub(normal.mul(self.dot(normal)).mul(@as(scalar_type, 2)));
+        }
+
+        /// In-place reflection; `self` is overwritten with `reflect`.
+        pub inline fn reflectSelf(self: *Self, normal: Self) void {
+            self.* = self.reflect(normal);
         }
 
         /// Refract an incident vector `self` at a surface with normal `normal`
@@ -843,6 +1084,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             const k = @as(scalar_type, 1) - ratio * ratio * (@as(scalar_type, 1) - dot_value * dot_value);
             if (k < 0) return Self.zero();
             return self.mul(ratio).sub(normal.mul(scalar.sqrt(k) + ratio * dot_value));
+        }
+
+        /// In-place refraction; `self` is overwritten with `refract`.
+        pub inline fn refractSelf(self: *Self, normal: Self, index_ratio: anytype) void {
+            self.* = self.refract(normal, index_ratio);
         }
 
         // ---- integer / bit ----
@@ -887,6 +1133,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        /// In-place bitfield extract; `self` is overwritten with `bitfieldExtract`.
+        pub inline fn bitfieldExtractSelf(self: *Self, offset: anytype, bits: anytype) void {
+            self.* = self.bitfieldExtract(offset, bits);
+        }
+
         /// Per-component bitfield insert (GLM `bitfieldInsert`): overlay the
         /// low `bits` bits of `insert` into `self` at `offset` (LSB origin).
         /// `insert`/`offset`/`bits` may be vectors or scalars. Inverse of
@@ -902,11 +1153,21 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        /// In-place bitfield insert; `self` is overwritten with `bitfieldInsert`.
+        pub inline fn bitfieldInsertSelf(self: *Self, insert: anytype, offset: anytype, bits: anytype) void {
+            self.* = self.bitfieldInsert(insert, offset, bits);
+        }
+
         /// Per-component bit reversal (GLM `bitfieldReverse`): mirror the
         /// whole lane, e.g. `0b1101 → 0b1011` for 4-bit lanes. Particularly
         /// useful for hashing grid hash cells across lanes.
         pub inline fn bitfieldReverse(self: Self) Self {
             return self.apply(scalar.bitfieldReverse);
+        }
+
+        /// In-place bit reversal; `self` is overwritten with `bitfieldReverse`.
+        pub inline fn bitfieldReverseSelf(self: *Self) void {
+            self.* = self.bitfieldReverse();
         }
 
         /// Per-component unsigned addition with carry out (GLM
@@ -948,14 +1209,29 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply2(right_hand_side, scalar.fmin);
         }
 
+        /// In-place NaN-safe minimum; `self` is overwritten with `fmin`.
+        pub inline fn fminSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.fmin(right_hand_side);
+        }
+
         /// Three-way NaN-safe minimum (GLM `fmin(x, y, z)`).
         pub inline fn fmin3(self: Self, right_hand_side: anytype, right_hand_side_2: anytype) Self {
             return self.apply3(right_hand_side, right_hand_side_2, scalar.fmin3);
         }
 
+        /// In-place three-way NaN-safe minimum; `self` is overwritten with `fmin3`.
+        pub inline fn fmin3Self(self: *Self, right_hand_side: anytype, right_hand_side_2: anytype) void {
+            self.* = self.fmin3(right_hand_side, right_hand_side_2);
+        }
+
         /// Four-way NaN-safe minimum (GLM `fmin(x, y, z, w)`).
         pub inline fn fmin4(self: Self, right_hand_side: anytype, right_hand_side_2: anytype, right_hand_side_3: anytype) Self {
             return self.fmin3(right_hand_side, right_hand_side_2).fmin(right_hand_side_3);
+        }
+
+        /// In-place four-way NaN-safe minimum; `self` is overwritten with `fmin4`.
+        pub inline fn fmin4Self(self: *Self, right_hand_side: anytype, right_hand_side_2: anytype, right_hand_side_3: anytype) void {
+            self.* = self.fmin4(right_hand_side, right_hand_side_2, right_hand_side_3);
         }
 
         /// Component-wise NaN-safe maximum (GLM `fmax`): NaN operands are
@@ -965,14 +1241,29 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply2(right_hand_side, scalar.fmax);
         }
 
+        /// In-place NaN-safe maximum; `self` is overwritten with `fmax`.
+        pub inline fn fmaxSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.fmax(right_hand_side);
+        }
+
         /// Three-way NaN-safe maximum (GLM `fmax(x, y, z)`).
         pub inline fn fmax3(self: Self, right_hand_side: anytype, right_hand_side_2: anytype) Self {
             return self.apply3(right_hand_side, right_hand_side_2, scalar.fmax3);
         }
 
+        /// In-place three-way NaN-safe maximum; `self` is overwritten with `fmax3`.
+        pub inline fn fmax3Self(self: *Self, right_hand_side: anytype, right_hand_side_2: anytype) void {
+            self.* = self.fmax3(right_hand_side, right_hand_side_2);
+        }
+
         /// Four-way NaN-safe maximum (GLM `fmax(x, y, z, w)`).
         pub inline fn fmax4(self: Self, right_hand_side: anytype, right_hand_side_2: anytype, right_hand_side_3: anytype) Self {
             return self.fmax3(right_hand_side, right_hand_side_2).fmax(right_hand_side_3);
+        }
+
+        /// In-place four-way NaN-safe maximum; `self` is overwritten with `fmax4`.
+        pub inline fn fmax4Self(self: *Self, right_hand_side: anytype, right_hand_side_2: anytype, right_hand_side_3: anytype) void {
+            self.* = self.fmax4(right_hand_side, right_hand_side_2, right_hand_side_3);
         }
 
         /// Component-wise clamp that ignores NaN (GLM `fclamp(x, lo, hi)`):
@@ -982,10 +1273,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply3(min_val, max_val, scalar.fclamp);
         }
 
+        /// In-place NaN-ignoring clamp; `self` is overwritten with `fclamp`.
+        pub inline fn fclampSelf(self: *Self, min_val: anytype, max_val: anytype) void {
+            self.* = self.fclamp(min_val, max_val);
+        }
+
         /// Clamp every component into [0, 1] (GLM `clamp01`, 1.1 addition).
         /// Shorthand for `clamp(0, 1)`, common in color math.
         pub inline fn clamp01(self: Self) Self {
             return self.apply(scalar.clamp01);
+        }
+
+        /// In-place clamp into [0, 1]; `self` is overwritten with `clamp01`.
+        pub inline fn clamp01Self(self: *Self) void {
+            self.* = self.clamp01();
         }
 
         /// Fractional part of every component (GLM `repeat`, 1.1 addition,
@@ -995,11 +1296,21 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.fract();
         }
 
+        /// In-place repeat; `self` is overwritten with `repeat`.
+        pub inline fn repeatSelf(self: *Self) void {
+            self.* = self.repeat();
+        }
+
         /// Reflect-and-repeat per component (GLM `mirrorClamp`, 1.1
         /// addition): `|x| mod 1`, i.e. a sawtooth clamped to [-1, 1] first.
         /// Use for mirrored, seamless tiling, e.g. a brick wall UV.
         pub inline fn mirrorClamp(self: Self) Self {
             return self.abs().fract();
+        }
+
+        /// In-place mirror-clamp; `self` is overwritten with `mirrorClamp`.
+        pub inline fn mirrorClampSelf(self: *Self) void {
+            self.* = self.mirrorClamp();
         }
 
         /// Mirrored repetition per component (GLM `mirrorRepeat`, 1.1
@@ -1010,6 +1321,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             var r: storage_type = undefined;
             inline for (0..component_count) |i| r[i] = scalar.mirrorRepeat(self.v[i]);
             return .{ .v = r };
+        }
+
+        /// In-place mirrored repetition; `self` is overwritten with `mirrorRepeat`.
+        pub inline fn mirrorRepeatSelf(self: *Self) void {
+            self.* = self.mirrorRepeat();
         }
 
         /// Round away from zero, returning an i32 vector (GLM `iround`, 1.1
@@ -1036,9 +1352,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.min(right_hand_side).min(right_hand_side_2);
         }
 
+        /// In-place three-way minimum; `self` is overwritten with `min3`.
+        pub inline fn min3Self(self: *Self, right_hand_side: Self, right_hand_side_2: Self) void {
+            self.* = self.min3(right_hand_side, right_hand_side_2);
+        }
+
         /// Four-way component-wise minimum (GLM `min(x, y, z, w)`).
         pub inline fn min4(self: Self, right_hand_side: Self, right_hand_side_2: Self, right_hand_side_3: Self) Self {
             return self.min(right_hand_side).min(right_hand_side_2).min(right_hand_side_3);
+        }
+
+        /// In-place four-way minimum; `self` is overwritten with `min4`.
+        pub inline fn min4Self(self: *Self, right_hand_side: Self, right_hand_side_2: Self, right_hand_side_3: Self) void {
+            self.* = self.min4(right_hand_side, right_hand_side_2, right_hand_side_3);
         }
 
         /// Three-way component-wise maximum (GLM `max(x, y, z)`).
@@ -1046,9 +1372,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.max(right_hand_side).max(right_hand_side_2);
         }
 
+        /// In-place three-way maximum; `self` is overwritten with `max3`.
+        pub inline fn max3Self(self: *Self, right_hand_side: Self, right_hand_side_2: Self) void {
+            self.* = self.max3(right_hand_side, right_hand_side_2);
+        }
+
         /// Four-way component-wise maximum (GLM `max(x, y, z, w)`).
         pub inline fn max4(self: Self, right_hand_side: Self, right_hand_side_2: Self, right_hand_side_3: Self) Self {
             return self.max(right_hand_side).max(right_hand_side_2).max(right_hand_side_3);
+        }
+
+        /// In-place four-way maximum; `self` is overwritten with `max4`.
+        pub inline fn max4Self(self: *Self, right_hand_side: Self, right_hand_side_2: Self, right_hand_side_3: Self) void {
+            self.* = self.max4(right_hand_side, right_hand_side_2, right_hand_side_3);
         }
 
         // ---- ext/vector_reciprocal ----
@@ -1060,14 +1396,29 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.sec);
         }
 
+        /// In-place per-component secant; `self` is overwritten with `sec`.
+        pub inline fn secSelf(self: *Self) void {
+            self.* = self.sec();
+        }
+
         /// Per-component cosecant (GLM `csc`): `1/sin(x)`.
         pub inline fn csc(self: Self) Self {
             return self.apply(scalar.csc);
         }
 
+        /// In-place per-component cosecant; `self` is overwritten with `csc`.
+        pub inline fn cscSelf(self: *Self) void {
+            self.* = self.csc();
+        }
+
         /// Per-component cotangent (GLM `cot`): `cos(x)/sin(x)`.
         pub inline fn cot(self: Self) Self {
             return self.apply(scalar.cot);
+        }
+
+        /// In-place per-component cotangent; `self` is overwritten with `cot`.
+        pub inline fn cotSelf(self: *Self) void {
+            self.* = self.cot();
         }
 
         /// Per-component arc secant (GLM `asec`): `acos(1/x)`, domain
@@ -1076,10 +1427,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.asec);
         }
 
+        /// In-place per-component arc secant; `self` is overwritten with `asec`.
+        pub inline fn asecSelf(self: *Self) void {
+            self.* = self.asec();
+        }
+
         /// Per-component arc cosecant (GLM `acsc`): `asin(1/x)`, domain
         /// |x| ≥ 1.
         pub inline fn acsc(self: Self) Self {
             return self.apply(scalar.acsc);
+        }
+
+        /// In-place per-component arc cosecant; `self` is overwritten with `acsc`.
+        pub inline fn acscSelf(self: *Self) void {
+            self.* = self.acsc();
         }
 
         /// Per-component arc cotangent (GLM `acot`): `atan(1/x)`.
@@ -1088,9 +1449,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.acot);
         }
 
+        /// In-place per-component arc cotangent; `self` is overwritten with `acot`.
+        pub inline fn acotSelf(self: *Self) void {
+            self.* = self.acot();
+        }
+
         /// Per-component hyperbolic secant (GLM `sech`): `1/cosh(x)`.
         pub inline fn sech(self: Self) Self {
             return self.apply(scalar.sech);
+        }
+
+        /// In-place per-component hyperbolic secant; `self` is overwritten with `sech`.
+        pub inline fn sechSelf(self: *Self) void {
+            self.* = self.sech();
         }
 
         /// Per-component hyperbolic cosecant (GLM `csch`): `1/sinh(x)`;
@@ -1099,10 +1470,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.csch);
         }
 
+        /// In-place per-component hyperbolic cosecant; `self` is overwritten with `csch`.
+        pub inline fn cschSelf(self: *Self) void {
+            self.* = self.csch();
+        }
+
         /// Per-component hyperbolic cotangent (GLM `coth`):
         /// `cosh(x)/sinh(x)`; NaN at x = 0.
         pub inline fn coth(self: Self) Self {
             return self.apply(scalar.coth);
+        }
+
+        /// In-place per-component hyperbolic cotangent; `self` is overwritten with `coth`.
+        pub inline fn cothSelf(self: *Self) void {
+            self.* = self.coth();
         }
 
         /// Per-component inverse hyperbolic secant (GLM `asech`):
@@ -1111,16 +1492,31 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.asech);
         }
 
+        /// In-place per-component inverse hyperbolic secant; `self` is overwritten with `asech`.
+        pub inline fn asechSelf(self: *Self) void {
+            self.* = self.asech();
+        }
+
         /// Per-component inverse hyperbolic cosecant (GLM `acsch`):
         /// `asinh(1/x)`, defined for x ≠ 0.
         pub inline fn acsch(self: Self) Self {
             return self.apply(scalar.acsch);
         }
 
+        /// In-place per-component inverse hyperbolic cosecant; `self` is overwritten with `acsch`.
+        pub inline fn acschSelf(self: *Self) void {
+            self.* = self.acsch();
+        }
+
         /// Per-component inverse hyperbolic cotangent (GLM `acoth`):
         /// `atanh(1/x)`, domain |x| > 1.
         pub inline fn acoth(self: Self) Self {
             return self.apply(scalar.acoth);
+        }
+
+        /// In-place per-component inverse hyperbolic cotangent; `self` is overwritten with `acoth`.
+        pub inline fn acothSelf(self: *Self) void {
+            self.* = self.acoth();
         }
 
         // ---- ext/vector_relational + gtc/epsilon ----
@@ -1247,11 +1643,21 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.nextFloat);
         }
 
+        /// In-place next representable float; `self` is overwritten with `nextFloat`.
+        pub inline fn nextFloatSelf(self: *Self) void {
+            self.* = self.nextFloat();
+        }
+
         /// Per-component previous representable float, toward −∞ (GLM
         /// `prevFloat`, 1.1 addition): the largest float strictly less than
         /// the lane, or the lane itself at −∞.
         pub inline fn prevFloat(self: Self) Self {
             return self.apply(scalar.prevFloat);
+        }
+
+        /// In-place previous representable float; `self` is overwritten with `prevFloat`.
+        pub inline fn prevFloatSelf(self: *Self) void {
+            self.* = self.prevFloat();
         }
 
         /// Per-component count of representable floats strictly between the
@@ -1342,6 +1748,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        /// In-place next multiple; `self` is overwritten with `nextMultiple`.
+        pub inline fn nextMultipleSelf(self: *Self, multiple: anytype) void {
+            self.* = self.nextMultiple(multiple);
+        }
+
         /// Previous integer ≤ `self[i]` divisible by `multiple` (GLM
         /// `prevMultiple`); the floor counterpart of `nextMultiple`.
         pub fn prevMultiple(self: Self, multiple: anytype) Self {
@@ -1352,6 +1763,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
                 r[i] = scalar.prevMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
+        }
+
+        /// In-place previous multiple; `self` is overwritten with `prevMultiple`.
+        pub inline fn prevMultipleSelf(self: *Self, multiple: anytype) void {
+            self.* = self.prevMultiple(multiple);
         }
 
         /// Any integer ≥ `self[i]` divisible by `multiple` that minimizes
@@ -1368,6 +1784,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        /// In-place ceil-multiple; `self` is overwritten with `ceilMultiple`.
+        pub inline fn ceilMultipleSelf(self: *Self, multiple: anytype) void {
+            self.* = self.ceilMultiple(multiple);
+        }
+
         /// Any integer ≤ `self[i]` divisible by `multiple` that minimizes
         /// the distance to `self[i]` (GLM `floorMultiple` — nearest-aligned
         /// with ties going down). The twin of `ceilMultiple`.
@@ -1379,6 +1800,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
                 r[i] = scalar.floorMultiple(self.v[i], if (mv) multiple.v[i] else multiple);
             }
             return .{ .v = r };
+        }
+
+        /// In-place floor-multiple; `self` is overwritten with `floorMultiple`.
+        pub inline fn floorMultipleSelf(self: *Self, multiple: anytype) void {
+            self.* = self.floorMultiple(multiple);
         }
 
         /// Any integer divisible by `multiple` that minimizes the distance
@@ -1393,10 +1819,20 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        /// In-place round-multiple; `self` is overwritten with `roundMultiple`.
+        pub inline fn roundMultipleSelf(self: *Self, multiple: anytype) void {
+            self.* = self.roundMultiple(multiple);
+        }
+
         /// Smallest power of two ≥ each lane (GLM `ceilPowerOfTwo`).
         /// Classic use: size a render target or texture to a POT dimension.
         pub fn ceilPowerOfTwo(self: Self) Self {
             return self.apply(scalar.ceilPowerOfTwo);
+        }
+
+        /// In-place ceil-power-of-two; `self` is overwritten with `ceilPowerOfTwo`.
+        pub inline fn ceilPowerOfTwoSelf(self: *Self) void {
+            self.* = self.ceilPowerOfTwo();
         }
 
         /// Largest power of two ≤ each lane (GLM `floorPowerOfTwo`).
@@ -1405,9 +1841,19 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.floorPowerOfTwo);
         }
 
+        /// In-place floor-power-of-two; `self` is overwritten with `floorPowerOfTwo`.
+        pub inline fn floorPowerOfTwoSelf(self: *Self) void {
+            self.* = self.floorPowerOfTwo();
+        }
+
         /// Power of two nearest to each lane (GLM `roundPowerOfTwo`).
         pub fn roundPowerOfTwo(self: Self) Self {
             return self.apply(scalar.roundPowerOfTwo);
+        }
+
+        /// In-place round-power-of-two; `self` is overwritten with `roundPowerOfTwo`.
+        pub inline fn roundPowerOfTwoSelf(self: *Self) void {
+            self.* = self.roundPowerOfTwo();
         }
 
         /// Smallest power of two ≥ each lane, returning ≥ 1 (GLM
@@ -1418,12 +1864,22 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return self.apply(scalar.nextPowerOfTwo);
         }
 
+        /// In-place next-power-of-two; `self` is overwritten with `nextPowerOfTwo`.
+        pub inline fn nextPowerOfTwoSelf(self: *Self) void {
+            self.* = self.nextPowerOfTwo();
+        }
+
         /// Largest power of two ≤ each lane, clamping results to 1 for
         /// inputs below 2 (GLM `prevPowerOfTwo`): alias of
         /// `floorPowerOfTwo` except that 0 and 1 (and negatives) yield 1
         /// instead of 0.
         pub fn prevPowerOfTwo(self: Self) Self {
             return self.apply(scalar.prevPowerOfTwo);
+        }
+
+        /// In-place prev-power-of-two; `self` is overwritten with `prevPowerOfTwo`.
+        pub inline fn prevPowerOfTwoSelf(self: *Self) void {
+            self.* = self.prevPowerOfTwo();
         }
 
         /// Per-component index of the start of the most significant run of

@@ -142,11 +142,21 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
+        /// In-place element-wise addition; `self` is overwritten with `add`.
+        pub fn addSelf(self: *Self, right_hand_side: Self) void {
+            self.* = self.add(right_hand_side);
+        }
+
         /// Element-wise subtraction (GLM `mat - mat`); inverse of `add`.
         pub fn sub(self: Self, right_hand_side: Self) Self {
             var res: Self = undefined;
             inline for (0..num_columns) |c| res.data[c] = self.data[c].sub(right_hand_side.data[c]);
             return res;
+        }
+
+        /// In-place element-wise subtraction; `self` is overwritten with `sub`.
+        pub fn subSelf(self: *Self, right_hand_side: Self) void {
+            self.* = self.sub(right_hand_side);
         }
 
         /// Scalar multiplication: every element × `scalar_value` (GLM `mat * scalar`).
@@ -158,6 +168,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
+        /// In-place scalar multiplication; `self` is overwritten with `mulScalar`.
+        pub fn mulScalarSelf(self: *Self, scalar_value: anytype) void {
+            self.* = self.mulScalar(scalar_value);
+        }
+
         /// Component-wise (Hadamard) product (GLM `matrixCompMult`):
         /// `res[c][r] = a[c][r] * b[c][r]`. Distinct from real matrix
         /// multiplication `mul`; GLM uses it internally for its `mix`.
@@ -165,6 +180,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             var res: Self = undefined;
             inline for (0..num_columns) |c| res.data[c] = self.data[c].mul(right_hand_side.data[c]);
             return res;
+        }
+
+        /// In-place component-wise product; `self` is overwritten with `matrixCompMult`.
+        pub fn matrixCompMultSelf(self: *Self, right_hand_side: Self) void {
+            self.* = self.matrixCompMult(right_hand_side);
         }
 
         /// Matrix product `self * right_hand_side` (GLM `mat * mat`): column-major
@@ -331,6 +351,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             }
         }
 
+        /// In-place inverse; `self` is overwritten with `inverse`.
+        pub fn inverseSelf(self: *Self) void {
+            self.* = self.inverse();
+        }
+
         // ---- transforms (4x4 only) ----
 
         /// Append a translation by `translation` (GLM `translate(m, v)`): rebuilds
@@ -348,6 +373,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
+        /// In-place translate; `self` is overwritten with `translate`.
+        pub fn translateSelf(self: *Self, translation: Vec(3, scalar_type)) void {
+            self.* = self.translate(translation);
+        }
+
         /// Append a non-uniform scale by `scale_factors` (GLM `scale(m, v)`): multiplies the
         /// first three columns by the respective `scale_factors` components, keeping the
         /// translation column untouched, so the scale is applied in the
@@ -360,6 +390,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             res.data[2] = self.data[2].mul(scale_factors.v[2]);
             res.data[3] = self.data[3];
             return res;
+        }
+
+        /// In-place scale; `self` is overwritten with `scale`.
+        pub fn scaleSelf(self: *Self, scale_factors: Vec(3, scalar_type)) void {
+            self.* = self.scale(scale_factors);
         }
 
         /// Append a rotation of `angle` radians around `axis` (GLM
@@ -396,6 +431,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
                 .add(self.data[2].mul(rot.data[2].v[2]));
             res.data[3] = self.data[3];
             return res;
+        }
+
+        /// In-place rotate; `self` is overwritten with `rotate`.
+        pub fn rotateSelf(self: *Self, angle: scalar_type, axis: Vec(3, scalar_type)) void {
+            self.* = self.rotate(angle, axis);
         }
 
         /// Convert to a 4x4 matrix (GLM `mat4(mat)` constructor behavior):
@@ -487,6 +527,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
+        /// In-place absolute value; `self` is overwritten with `abs`.
+        pub inline fn absSelf(self: *Self) void {
+            self.* = self.abs();
+        }
+
         /// Blend between `self` and `right_hand_side` (GLM `mix(x, y, a)`):
         /// - `factor` scalar: per-element `x·(1−a) + y·a` (the linear lerp),
         /// - `factor` matrix: GLM's quirky elementwise formula
@@ -503,6 +548,11 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             var res: Self = undefined;
             inline for (0..num_columns) |c| res.data[c] = self.data[c].mul(@as(scalar_type, 1) - factor_value).add(right_hand_side.data[c].mul(factor_value));
             return res;
+        }
+
+        /// In-place blend; `self` is overwritten with `mix`.
+        pub fn mixSelf(self: *Self, right_hand_side: Self, factor: anytype) void {
+            self.* = self.mix(right_hand_side, factor);
         }
 
         // ---- ext/matrix_relational ----

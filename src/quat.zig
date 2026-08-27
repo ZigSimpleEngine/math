@@ -115,9 +115,19 @@ pub fn Quat(comptime scalar_type: type) type {
             return .{ .w = self.w + right_hand_side.w, .x = self.x + right_hand_side.x, .y = self.y + right_hand_side.y, .z = self.z + right_hand_side.z };
         }
 
+        /// In-place component-wise addition; `self` is overwritten with `add`.
+        pub inline fn addSelf(self: *Self, right_hand_side: Self) void {
+            self.* = self.add(right_hand_side);
+        }
+
         /// Component-wise subtraction (GLM `operator-`); inverse of `add`.
         pub inline fn sub(self: Self, right_hand_side: Self) Self {
             return .{ .w = self.w - right_hand_side.w, .x = self.x - right_hand_side.x, .y = self.y - right_hand_side.y, .z = self.z - right_hand_side.z };
+        }
+
+        /// In-place component-wise subtraction; `self` is overwritten with `sub`.
+        pub inline fn subSelf(self: *Self, right_hand_side: Self) void {
+            self.* = self.sub(right_hand_side);
         }
 
         /// Component-wise negation (GLM unary `operator-`): represents the same
@@ -125,6 +135,11 @@ pub fn Quat(comptime scalar_type: type) type {
         /// product is negative to pick the short arc.
         pub inline fn neg(self: Self) Self {
             return .{ .w = -self.w, .x = -self.x, .y = -self.y, .z = -self.z };
+        }
+
+        /// In-place negation; `self` is overwritten with `neg`.
+        pub inline fn negSelf(self: *Self) void {
+            self.* = self.neg();
         }
 
         /// Hamilton product (GLM `operator*`, quat * quat): the composition
@@ -141,6 +156,11 @@ pub fn Quat(comptime scalar_type: type) type {
             };
         }
 
+        /// In-place Hamilton product; `self` is overwritten with `mul`.
+        pub inline fn mulSelf(self: *Self, right_hand_side: Self) void {
+            self.* = self.mul(right_hand_side);
+        }
+
         /// Scalar multiplication (GLM `operator*`, quat * scalar): scales all
         /// four components. With unit quaternions this is a smooth path
         /// toward zero (used by `mix`/`slerp`), not a rotation.
@@ -149,12 +169,22 @@ pub fn Quat(comptime scalar_type: type) type {
             return .{ .w = self.w * value, .x = self.x * value, .y = self.y * value, .z = self.z * value };
         }
 
+        /// In-place scalar multiplication; `self` is overwritten with `mulScalar`.
+        pub inline fn mulScalarSelf(self: *Self, scalar_value: anytype) void {
+            self.* = self.mulScalar(scalar_value);
+        }
+
         /// Scalar division (GLM `operator/`, quat / scalar): removes the scale
         /// a previous `mulScalar` introduced without a division per
         /// component — used by `normalize` and the slerp formulas.
         pub inline fn divScalar(self: Self, scalar_value: anytype) Self {
             const value = scalar.cast(scalar_type, scalar_value);
             return .{ .w = self.w / value, .x = self.x / value, .y = self.y / value, .z = self.z / value };
+        }
+
+        /// In-place scalar division; `self` is overwritten with `divScalar`.
+        pub inline fn divScalarSelf(self: *Self, scalar_value: anytype) void {
+            self.* = self.divScalar(scalar_value);
         }
 
         /// Rotate a 3D vector by this quaternion (GLM `operator*`, quat * vec3),
@@ -202,6 +232,11 @@ pub fn Quat(comptime scalar_type: type) type {
             return self.divScalar(norm);
         }
 
+        /// In-place renormalization to unit length; `self` is overwritten with `normalize`.
+        pub inline fn normalizeSelf(self: *Self) void {
+            self.* = self.normalize();
+        }
+
         /// Conjugate (GLM `conjugate(qua)`): flips the imaginary part. For unit
         /// quaternions this is the inverse rotation — `q.mul(q.conjugate())`
         /// is the identity, so use it to build difference quaternions
@@ -210,12 +245,22 @@ pub fn Quat(comptime scalar_type: type) type {
             return .{ .w = self.w, .x = -self.x, .y = -self.y, .z = -self.z };
         }
 
+        /// In-place conjugate; `self` is overwritten with `conjugate`.
+        pub inline fn conjugateSelf(self: *Self) void {
+            self.* = self.conjugate();
+        }
+
         /// True inverse (GLM `inverse(qua)`): `conjugate / |q|²`. For unit
         /// quaternions `inverse` == `conjugate` (cheaper — prefer it);
         /// the full form matters only for non-unit quaternions driving
         /// similarity transforms.
         pub inline fn inverse(self: Self) Self {
             return self.conjugate().divScalar(self.dot(self));
+        }
+
+        /// In-place inverse; `self` is overwritten with `inverse`.
+        pub inline fn inverseSelf(self: *Self) void {
+            self.* = self.inverse();
         }
 
         /// `{any}` formatter: prints `{w,x,y,z}` with `{d}` floats, e.g.
