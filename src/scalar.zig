@@ -214,7 +214,7 @@ pub fn fma(left_hand_side: anytype, right_hand_side: anytype, addend: anytype) @
 
 /// Split `value` into its integral and fractional parts; both parts keep the
 /// sign of `value` (unlike `fract`, which is always positive).
-pub fn modf(value: anytype) struct { fract: @TypeOf(value), integral: @TypeOf(value) } {
+pub fn modf(value: anytype) extern struct { fract: @TypeOf(value), integral: @TypeOf(value) } {
     const scalar_type = @TypeOf(value);
     const integral: scalar_type = trunc(value);
     return .{ .fract = value - integral, .integral = integral };
@@ -223,7 +223,7 @@ pub fn modf(value: anytype) struct { fract: @TypeOf(value), integral: @TypeOf(va
 /// Split `value` into a significand in `[0.5, 1)` and an integer exponent such
 /// that `value == significand * 2^exponent`. Use to decompose a float's
 /// magnitude or to detect exponent ranges (e.g. for log-space work).
-pub fn frexp(value: anytype) struct { significand: floatType(@TypeOf(value)), exponent: i32 } {
+pub fn frexp(value: anytype) extern struct { significand: floatType(@TypeOf(value)), exponent: i32 } {
     const F = floatType(@TypeOf(value));
     const r = std.math.frexp(@as(F, value));
     return .{ .significand = r.significand, .exponent = r.exponent };
@@ -456,23 +456,23 @@ pub fn bitfieldReverse(value: anytype) @TypeOf(value) {
     return @bitReverse(value);
 }
 
-pub const AddCarryResult = struct { sum: u32, carry: u32 };
+pub const AddCarryResult = extern struct { sum: u32, carry: u32 };
 
 /// Unsigned addition that reports overflow: returns `sum` (wrapping) and
 /// `carry == 1` if `left_hand_side + right_hand_side` exceeded the type's range. Use for multi-word
 /// (big number) arithmetic chains.
-pub fn uaddCarry(left_hand_side: anytype, right_hand_side: anytype) struct { sum: @TypeOf(left_hand_side, right_hand_side), carry: @TypeOf(left_hand_side, right_hand_side) } {
+pub fn uaddCarry(left_hand_side: anytype, right_hand_side: anytype) extern struct { sum: @TypeOf(left_hand_side, right_hand_side), carry: @TypeOf(left_hand_side, right_hand_side) } {
     const scalar_type = @TypeOf(left_hand_side, right_hand_side);
     const r = @addWithOverflow(left_hand_side, right_hand_side);
-    return .{ .sum = r[0], .carry = if (r[1]) @as(scalar_type, 1) else @as(scalar_type, 0) };
+    return .{ .sum = r[0], .carry = if (r[1] != 0) @as(scalar_type, 1) else @as(scalar_type, 0) };
 }
 
 /// Unsigned subtraction that reports underflow: returns `diff` (wrapping)
 /// and `borrow == 1` if `right_hand_side > left_hand_side`. Use for multi-word arithmetic chains.
-pub fn usubBorrow(left_hand_side: anytype, right_hand_side: anytype) struct { diff: @TypeOf(left_hand_side, right_hand_side), borrow: @TypeOf(left_hand_side, right_hand_side) } {
+pub fn usubBorrow(left_hand_side: anytype, right_hand_side: anytype) extern struct { diff: @TypeOf(left_hand_side, right_hand_side), borrow: @TypeOf(left_hand_side, right_hand_side) } {
     const scalar_type = @TypeOf(left_hand_side, right_hand_side);
     const r = @subWithOverflow(left_hand_side, right_hand_side);
-    return .{ .diff = r[0], .borrow = if (r[1]) @as(scalar_type, 1) else @as(scalar_type, 0) };
+    return .{ .diff = r[0], .borrow = if (r[1] != 0) @as(scalar_type, 1) else @as(scalar_type, 0) };
 }
 
 // ---- reductions ----
@@ -715,7 +715,7 @@ pub fn epsilonNotEqual(left_hand_side: anytype, right_hand_side: anytype, epsilo
     return abs(left_hand_side - right_hand_side) >= epsilon;
 }
 
-const FltInt = struct {
+const FltInt = extern struct {
     fn asI32(value: f32) i32 {
         return @as(i32, @bitCast(value));
     }

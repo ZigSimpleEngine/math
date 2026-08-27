@@ -37,7 +37,7 @@ const floatType = scalar.floatType;
 /// Create a vector type with `component_count` components of type `scalar_type` (float, int or bool).
 /// The type name doubles as a namespace: `vec3.zero()`, `Vec(4, f32).one()`.
 pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
-    return struct {
+    return extern struct {
         pub const Self = @This();
         pub const len: comptime_int = component_count;
         pub const value_type: type = scalar_type;
@@ -678,7 +678,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// (GLM `modf`): `modf(2.75).fract == 0.75`,
         /// `modf(2.75).integral == 2.0`. Both parts keep the sign of the
         /// input and their sum equals it.
-        pub fn modf(self: Self) struct { fract: Self, integral: Self } {
+        pub fn modf(self: Self) extern struct { fract: Self, integral: Self } {
             var fr: storage_type = undefined;
             var it: storage_type = undefined;
             inline for (0..component_count) |i| {
@@ -693,7 +693,7 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// (GLM `frexp`): `x = significand · 2^exponent` with significand in
         /// [0.5, 1). Usually combined with `ldexp` to move a value between
         /// precisions or to serialize it losslessly.
-        pub fn frexp(self: Self) struct { significand: Self, exponent: Vec(component_count, i32) } {
+        pub fn frexp(self: Self) extern struct { significand: Self, exponent: Vec(component_count, i32) } {
             var sg: storage_type = undefined;
             var ex: @Vector(component_count, i32) = undefined;
             inline for (0..component_count) |i| {
@@ -1174,13 +1174,13 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// `uaddCarry`): `sum = x + y` modulo 2^bits, `carry` is 1 where
         /// the addition overflowed. Enables multi-precision arithmetic,
         /// e.g. a 128-bit accumulator in 4 lanes.
-        pub fn uaddCarry(self: Self, right_hand_side: Self) struct { sum: Self, carry: Self } {
+        pub fn uaddCarry(self: Self, right_hand_side: Self) extern struct { sum: Self, carry: Self } {
             var s: storage_type = undefined;
             var c: storage_type = undefined;
             inline for (0..component_count) |i| {
                 const r = @addWithOverflow(self.v[i], right_hand_side.v[i]);
                 s[i] = r[0];
-                c[i] = if (r[1]) scalar.cast(scalar_type, 1) else scalar.cast(scalar_type, 0);
+                c[i] = if (r[1] != 0) scalar.cast(scalar_type, 1) else scalar.cast(scalar_type, 0);
             }
             return .{ .sum = .{ .v = s }, .carry = .{ .v = c } };
         }
@@ -1189,13 +1189,13 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// `usubBorrow`): `diff = x - y` modulo 2^bits, `borrow` is 1
         /// where the subtraction underflowed. The unsigned twin of
         /// `uaddCarry`.
-        pub fn usubBorrow(self: Self, right_hand_side: Self) struct { diff: Self, borrow: Self } {
+        pub fn usubBorrow(self: Self, right_hand_side: Self) extern struct { diff: Self, borrow: Self } {
             var d: storage_type = undefined;
             var b: storage_type = undefined;
             inline for (0..component_count) |i| {
                 const r = @subWithOverflow(self.v[i], right_hand_side.v[i]);
                 d[i] = r[0];
-                b[i] = if (r[1]) scalar.cast(scalar_type, 1) else scalar.cast(scalar_type, 0);
+                b[i] = if (r[1] != 0) scalar.cast(scalar_type, 1) else scalar.cast(scalar_type, 0);
             }
             return .{ .diff = .{ .v = d }, .borrow = .{ .v = b } };
         }

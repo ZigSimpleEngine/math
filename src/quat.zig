@@ -25,7 +25,7 @@ const Mat = mat.Mat;
 /// quaternions equal up to a global sign represent the same rotation —
 /// normalize and be consistent when comparing.
 pub fn Quat(comptime scalar_type: type) type {
-    return struct {
+    return extern struct {
         const Self = @This();
 
         pub const value_type = scalar_type;
