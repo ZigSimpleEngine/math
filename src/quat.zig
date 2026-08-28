@@ -81,6 +81,25 @@ pub fn Quat(comptime scalar_type: type) type {
             };
         }
 
+        /// Right-handed look-at: the rotation quaternion that aligns the
+        /// −z axis with `direction` (GLM `quatLookAtRH(direction, up)`).
+        /// A producing const function — creates a new quaternion without
+        /// touching any state. The degenerate `direction ∥ up` case is
+        /// guarded by clamping the side-vector length instead of dividing
+        /// by zero.
+        pub fn lookAt(direction: Vec(3, scalar_type), up: Vec(3, scalar_type)) Self {
+            return quatLookAt(direction, up);
+        }
+
+        /// Right-handed look-at: the rotation quaternion that aligns the
+        /// −z axis with `direction` (GLM `quatLookAtRH(direction, up)`).
+        /// Updates quaternion at pointer. The degenerate `direction ∥ up` case is
+        /// guarded by clamping the side-vector length instead of dividing
+        /// by zero.
+        pub fn lookAtSelf(self: *Self, direction: Vec(3, scalar_type), up: Vec(3, scalar_type)) void {
+            self.* = quatLookAt(direction, up);
+        }
+
         // ---- component access ----
 
         /// Read component i (0..3, order x, y, z, w). For hot paths index

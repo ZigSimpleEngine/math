@@ -89,6 +89,20 @@ pub fn quarter_pi(comptime scalar_type: type) scalar_type {
     return cast(scalar_type, 0.785398163397448309615660845819875721);
 }
 
+/// π/180 — degrees→radians conversion factor: `angle_rad = degrees * radians(T)`.
+/// The constant behind `scalar.radians`; use it to convert a human-readable
+/// angle (e.g. from a UI slider) into something the trig functions expect.
+pub fn radians(comptime scalar_type: type) scalar_type {
+    return cast(scalar_type, 0.017453292519943295769236907684886127);
+}
+
+/// 180/π — radians→degrees conversion factor: `angle_deg = radians_value * degrees(T)`.
+/// The constant behind `scalar.degrees`; use it to turn a trig result back
+/// into a display angle.
+pub fn degrees(comptime scalar_type: type) scalar_type {
+    return cast(scalar_type, 57.29577951308232087679815481410517);
+}
+
 /// 1/π (GLM `one_over_pi<scalar_type>()`).
 pub fn one_over_pi(comptime scalar_type: type) scalar_type {
     return cast(scalar_type, 0.318309886183790671537767526745028724);

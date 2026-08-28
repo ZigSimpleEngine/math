@@ -25,6 +25,8 @@ pub const vec = @import("vec.zig");
 pub const mat = @import("mat.zig");
 /// Quaternion module: `Quat(T)` plus angle/Euler/matrix conversions.
 pub const quat = @import("quat.zig");
+/// Constants module: `pi(T)`, `two_pi(T)`, `e(T)`, `golden_ratio(T)`, ...
+pub const constants = @import("constants.zig");
 
 /// Vector type alias: `Vec(3, f32)` is vec3, `Vec(4, i32)` is ivec4...
 /// Instantiate via `vec.Vec(L, T)` or this shortcut.
