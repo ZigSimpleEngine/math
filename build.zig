@@ -1,16 +1,62 @@
 const std = @import("std");
-const LazyPath = std.Build.LazyPath;
-const Module = std.Build.Module;
 
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+const ThisBuild = @This();
 
-    const mod = b.addModule("math", .{
+pub const Options = struct {
+    /// The target architecture for which the module will be built.
+    target: ?std.Build.ResolvedTarget = null,
+    /// The optimization mode used to compile the module.
+    optimize: ?std.builtin.OptimizeMode = null,
+
+    pub fn initFromOptions(b: *std.Build) Options {
+        return .{
+            .target = b.standardTargetOptions(.{}),
+            .optimize = b.standardOptimizeOption(.{}),
+        };
+    }
+
+    /// Create the `math` module in the caller's build graph.
+    ///
+    /// Intended for parent packages that want a single shared instance:
+    /// ```zig
+    /// const math_mod = (@import("math").Options{
+    ///     .target = target,
+    ///     .optimize = optimize,
+    /// }).getModule(b);
+    /// ```
+    /// Uses `dependencyFromBuildZig` so source paths stay correct when
+    /// called from a parent build via `@import("math")`.
+    pub fn getModule(self: Options, b: *std.Build) *std.Build.Module {
+        const target = self.target orelse b.standardTargetOptions(.{});
+        const optimize = self.optimize orelse b.standardOptimizeOption(.{});
+        const self_dep = b.dependencyFromBuildZig(ThisBuild, .{
+            .target = target,
+            .optimize = optimize,
+        });
+        return b.createModule(.{
+            .root_source_file = self_dep.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+    }
+};
+
+/// Create the `math` module in the *own* package graph (standalone `zig build`).
+/// Same wiring as `Options.getModule` but uses `b.path` (valid only for own build).
+fn createModuleOwn(b: *std.Build, options: Options) *std.Build.Module {
+    const target = options.target orelse b.standardTargetOptions(.{});
+    const optimize = options.optimize orelse b.standardOptimizeOption(.{});
+    return b.addModule("math", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+}
+
+pub fn build(b: *std.Build) void {
+    const options = Options.initFromOptions(b);
+
+    const mod = createModuleOwn(b, options);
 
     const tests = b.addTest(.{ .root_module = mod });
     const run_tests = b.addRunArtifact(tests);
