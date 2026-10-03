@@ -405,7 +405,7 @@ pub fn mat3_cast(quaternion: anytype) Mat(3, 3, @TypeOf(quaternion).value_type) 
 /// usual way to feed a quaternion rotation into a transform
 /// pipeline (after which `translate`/`scale` compose normally).
 pub fn mat4_cast(quaternion: anytype) Mat(4, 4, @TypeOf(quaternion).value_type) {
-    return mat3_cast(quaternion).toMat4();
+    return Mat(4, 4, @TypeOf(quaternion).value_type).init(mat3_cast(quaternion));
 }
 
 /// Convert a 3x3 rotation matrix to a quaternion (GLM `quat_cast(mat3)`):

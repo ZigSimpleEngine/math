@@ -35,3 +35,7 @@ pub const Vec = vec.Vec;
 pub const Mat = mat.Mat;
 /// Quaternion type alias: `Quat(f32)` is the single-precision quaternion.
 pub const Quat = quat.Quat;
+
+test {
+    _ = @import("tests.zig");
+}

@@ -27,6 +27,13 @@ fn expectMat4Approx(actual: anytype, expected: [16]f32, tolerance: f32) !void {
     };
 }
 
+fn expectMatApprox(actual: anytype, expected: anytype, tolerance: f32) !void {
+    const A = @TypeOf(actual);
+    inline for (0..A.cols) |c| inline for (0..A.rows) |r| {
+        try std.testing.expectApproxEqAbs(expected[c][r], actual.data[c].v[r], tolerance);
+    };
+}
+
 fn expectVecApprox(actual: anytype, expected: anytype, tolerance: f32) !void {
     const A = @TypeOf(actual);
     inline for (0..A.len) |i| {
@@ -66,7 +73,7 @@ test "scalar common" {
 }
 
 test "scalar modf frexp ldexp" {
-    const m = scalar.modf(5.5);
+    const m = scalar.modf(@as(f32, 5.5));
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), m.fract, 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 5), m.integral, 1e-6);
     const f = scalar.frexp(@as(f32, 12.5));
@@ -600,18 +607,127 @@ test "mat comp mult outer" {
         0, 0, 2, 0,
         0, 0, 0, 2,
     }, 1e-6);
-    try expectMat4Approx(mat.outerProduct(vec3.init(.{ 1, 2, 3 }), vec3.init(.{ 4, 5, 6 })).toMat4(), .{
+    try expectMat4Approx(mat4.init(mat.outerProduct(vec3.init(.{ 1, 2, 3 }), vec3.init(.{ 4, 5, 6 }))), .{
         4, 8, 12, 0,
         5, 10, 15, 0,
         6, 12, 18, 0,
         0, 0, 0, 1,
     }, 1e-6);
-    try expectMat4Approx(mat.outerProduct(vec2.init(.{ 1, 2 }), vec3.init(.{ 4, 5, 6 })).toMat4(), .{
+    try expectMat4Approx(mat4.init(mat.outerProduct(vec2.init(.{ 1, 2 }), vec3.init(.{ 4, 5, 6 }))), .{
         4, 8, 0, 0,
         5, 10, 0, 0,
         6, 12, 1, 0,
         0, 0, 0, 1,
     }, 1e-6);
+}
+
+test "mat GLSL conversion" {
+    const m4 = mat4.init(.{
+        vec4.init(.{ 1, 2, 3, 4 }),
+        vec4.init(.{ 5, 6, 7, 8 }),
+        vec4.init(.{ 9, 10, 11, 12 }),
+        vec4.init(.{ 13, 14, 15, 16 }),
+    });
+
+    // truncation 4 -> 3 and 4 -> 2 (upper-left submatrix)
+    try expectMatApprox(mat3.init(m4), [3][3]f32{
+        .{ 1, 2, 3 },
+        .{ 5, 6, 7 },
+        .{ 9, 10, 11 },
+    }, 1e-6);
+    try expectMatApprox(m4.toMat(3, 3), [3][3]f32{
+        .{ 1, 2, 3 },
+        .{ 5, 6, 7 },
+        .{ 9, 10, 11 },
+    }, 1e-6);
+    try expectMatApprox(mat2.init(m4), [2][2]f32{
+        .{ 1, 2 },
+        .{ 5, 6 },
+    }, 1e-6);
+
+    // padding 2 -> 3 (canonical GLSL example) and 3 -> 4 (wiki diag example)
+    const m2 = mat2.init(.{
+        vec2.init(.{ 1, 2 }),
+        vec2.init(.{ 3, 4 }),
+    });
+    try expectMatApprox(mat3.init(m2), [3][3]f32{
+        .{ 1, 2, 0 },
+        .{ 3, 4, 0 },
+        .{ 0, 0, 1 },
+    }, 1e-6);
+    try expectMatApprox(mat4.init(mat3.init(5.0)), [4][4]f32{
+        .{ 5, 0, 0, 0 },
+        .{ 0, 5, 0, 0 },
+        .{ 0, 0, 5, 0 },
+        .{ 0, 0, 0, 1 },
+    }, 1e-6);
+
+    // rectangular both ways; 4x2 from 2x4 carries no diagonal ones
+    const m24 = Mat(2, 4, f32).init(.{
+        vec4.init(.{ 1, 2, 3, 4 }),
+        vec4.init(.{ 5, 6, 7, 8 }),
+    });
+    try expectMatApprox(Mat(4, 2, f32).init(m24), [4][2]f32{
+        .{ 1, 2 },
+        .{ 5, 6 },
+        .{ 0, 0 },
+        .{ 0, 0 },
+    }, 1e-6);
+    try expectMatApprox(Mat(2, 4, f32).init(Mat(4, 2, f32).init(m24)), [2][4]f32{
+        .{ 1, 2, 0, 0 },
+        .{ 5, 6, 0, 0 },
+    }, 1e-6);
+    // 2x3 -> 4x4 puts the identity 1 at (2,2)
+    const m23 = Mat(2, 3, f32).init(.{
+        vec3.init(.{ 1, 2, 3 }),
+        vec3.init(.{ 4, 5, 6 }),
+    });
+    try expectMatApprox(mat4.init(m23), [4][4]f32{
+        .{ 1, 2, 3, 0 },
+        .{ 4, 5, 6, 0 },
+        .{ 0, 0, 1, 0 },
+        .{ 0, 0, 0, 1 },
+    }, 1e-6);
+
+    // flat scalar stream fills column by column
+    try expectMatApprox(mat2.init(.{ 1, 2, 3, 4 }), [2][2]f32{
+        .{ 1, 2 },
+        .{ 3, 4 },
+    }, 1e-6);
+    // mixed vectors/scalars (wiki mat3 shape) and a bare vector stream
+    try expectMatApprox(mat3.init(.{
+        vec2.init(.{ 1, 2 }),
+        3.0,
+        vec2.init(.{ 4, 5 }),
+        6.0,
+        vec2.init(.{ 7, 8 }),
+        9.0,
+    }), [3][3]f32{
+        .{ 1, 2, 3 },
+        .{ 4, 5, 6 },
+        .{ 7, 8, 9 },
+    }, 1e-6);
+    try expectMatApprox(mat2.init(vec4.init(.{ 1, 2, 3, 4 })), [2][2]f32{
+        .{ 1, 2 },
+        .{ 3, 4 },
+    }, 1e-6);
+
+    // cross scalar type with cast
+    const m2i = Mat(2, 2, i32).init(.{ 1, 2, 3, 4 });
+    try expectMatApprox(mat2.init(m2i), [2][2]f32{
+        .{ 1, 2 },
+        .{ 3, 4 },
+    }, 1e-6);
+
+    // normal matrix end to end: non-uniform scale + translation
+    const model = mat4.identity().scale(vec3.init(.{ 2, 3, 4 })).translate(vec3.init(.{ 1, 2, 3 }));
+    const expected_n = [3][3]f32{
+        .{ 0.5, 0, 0 },
+        .{ 0, 1.0 / 3.0, 0 },
+        .{ 0, 0, 0.25 },
+    };
+    try expectMatApprox(mat3.init(model.inverse().transpose()), expected_n, 1e-6);
+    try expectMatApprox(model.inverse().transpose().toMat(3, 3), expected_n, 1e-6);
 }
 
 fn expectQuatApprox(actual: anytype, expected: [4]f32, tolerance: f32) !void {

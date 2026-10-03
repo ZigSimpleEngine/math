@@ -80,28 +80,108 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
-        /// Build a matrix from a tuple of columns, each a `Vec(num_rows, scalar_type)`
-        /// (GLM's `mat(c0, c1, ...)` column constructor), or from a plain
-        /// scalar which produces `diag(v)`. Use for literals:
-        /// `mat4.init(.{ c0, c1, c2, c3 })` where `cN` are `vec4`s.
+        /// Build a matrix, GLSL-constructor style:
+        /// - `Self` is returned as-is;
+        /// - a single scalar produces `diag(v)` (GLSL `mat(v)`: value on the
+        ///   diagonal, zeroes elsewhere);
+        /// - a single matrix of any shape converts per GLSL `mat(dst, src)`:
+        ///   overlapping `res[c][r] = src[c][r]`, everything else filled from
+        ///   the identity (`1` on the diagonal, `0` elsewhere), values cast to
+        ///   `scalar_type`. This covers both truncation (`mat3(model)`) and
+        ///   padding (`mat4(small)`); e.g. the normal matrix of a `model` is
+        ///   `Mat(3, 3, f32).init(model.inverse().transpose())`;
+        /// - otherwise `args` is a tuple — or a single vector — of scalars
+        ///   and/or vectors consumed in order, column by column (GLSL
+        ///   column-major fill): `mat2.init(.{ 1, 2, 3, 4 })`,
+        ///   `mat4.init(.{ c0, c1, c2, c3 })`,
+        ///   `mat3.init(.{ v2, z0, v2, z1, v2, z2 })`. The total component
+        ///   count must be exactly `num_columns * num_rows`. A matrix cannot
+        ///   be mixed into such a tuple (GLSL only allows a matrix as the
+        ///   single argument).
         pub fn init(args: anytype) Self {
             const AT = @TypeOf(args);
             if (comptime AT == Self) return args;
             if (comptime scalar.isNumber(AT)) return diag(args);
-            const fields = @typeInfo(AT).@"struct".fields;
+            if (comptime isMat(AT)) return fromMat(args);
+            return fromComponents(args);
+        }
+
+        /// Convert a matrix of any shape to `Self` (GLSL `mat(dst, src)`):
+        /// overlapping elements are copied, the rest is filled from the
+        /// identity matrix (`1` on the diagonal, `0` elsewhere); values are
+        /// cast to `scalar_type`.
+        fn fromMat(source: anytype) Self {
+            const ST = @TypeOf(source);
+            if (comptime !isMat(ST)) @compileError("Mat fromMat: expected a matrix, got " ++ @typeName(ST));
             var res: Self = undefined;
-            comptime var n: usize = 0;
-            inline for (fields) |f| {
-                const e = @field(args, f.name);
-                const ET = @TypeOf(e);
-                if (comptime !(ET == Vec(num_rows, scalar_type)))
-                    @compileError("Mat init: expected column of type " ++ @typeName(Vec(num_rows, scalar_type)));
-                if (comptime n >= num_columns) @compileError("Mat init: too many columns");
-                res.data[n] = e;
-                n += 1;
+            inline for (0..num_columns) |c| {
+                inline for (0..num_rows) |r| {
+                    if (comptime c < ST.cols and r < ST.rows) {
+                        res.data[c].v[r] = scalar.cast(scalar_type, source.data[c].v[r]);
+                    } else {
+                        if (comptime c == r) {
+                            res.data[c].v[r] = scalar.cast(scalar_type, 1);
+                        } else {
+                            res.data[c].v[r] = scalar.cast(scalar_type, 0);
+                        }
+                    }
+                }
             }
-            if (comptime n != num_columns) @compileError("Mat init: expected " ++ comptimePrint("{d}", .{num_columns}) ++ " columns");
             return res;
+        }
+
+        /// Fill `Self` from scalars and/or vectors consumed in order, column
+        /// by column (GLSL column-major multi-value construction). Scalars
+        /// contribute one component, vectors `len` components; values are cast
+        /// to `scalar_type` and the total must be exactly
+        /// `num_columns * num_rows`.
+        fn fromComponents(args: anytype) Self {
+            const AT = @TypeOf(args);
+            if (comptime @typeInfo(AT) != .@"struct" and !vec.isVec(AT))
+                @compileError("Mat init: expected a scalar, a matrix, a vector or a tuple of scalars/vectors, got " ++ @typeName(AT));
+            var flat: [num_columns * num_rows]scalar_type = undefined;
+            comptime var n: usize = 0;
+            if (comptime vec.isVec(AT)) {
+                inline for (0..AT.len) |k| {
+                    if (comptime n >= flat.len) @compileError("Mat init: too many components");
+                    flat[n] = scalar.cast(scalar_type, args.v[k]);
+                    n += 1;
+                }
+            } else {
+                inline for (@typeInfo(AT).@"struct".fields) |f| {
+                    const e = @field(args, f.name);
+                    const ET = @TypeOf(e);
+                    if (comptime isMat(ET)) @compileError("Mat init: a matrix can only be the single argument; convert it with init/toMat instead");
+                    if (comptime vec.isVec(ET)) {
+                        inline for (0..ET.len) |k| {
+                            if (comptime n >= flat.len) @compileError("Mat init: too many components");
+                            flat[n] = scalar.cast(scalar_type, e.v[k]);
+                            n += 1;
+                        }
+                    } else {
+                        if (comptime n >= flat.len) @compileError("Mat init: too many components");
+                        flat[n] = scalar.cast(scalar_type, e);
+                        n += 1;
+                    }
+                }
+            }
+            if (comptime n != flat.len) @compileError("Mat init: expected " ++ comptimePrint("{d}", .{flat.len}) ++ " components, got " ++ comptimePrint("{d}", .{n}));
+            var res: Self = undefined;
+            inline for (0..num_columns) |c| {
+                inline for (0..num_rows) |r| {
+                    res.data[c].v[r] = flat[c * num_rows + r];
+                }
+            }
+            return res;
+        }
+
+        /// Convert `self` to a matrix with `dest_columns` columns and
+        /// `dest_rows` rows (GLSL `mat(dst, src)` conversion): overlapping
+        /// elements are copied, the rest is filled from the identity matrix.
+        /// E.g. the normal matrix of a `model: mat4` is
+        /// `model.inverse().transpose().toMat(3, 3)`.
+        pub fn toMat(self: Self, comptime dest_columns: usize, comptime dest_rows: usize) Mat(dest_columns, dest_rows, scalar_type) {
+            return Mat(dest_columns, dest_rows, scalar_type).fromMat(self);
         }
 
         // ---- accessors ----
@@ -436,68 +516,6 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         /// In-place rotate; `self` is overwritten with `rotate`.
         pub fn rotateSelf(self: *Self, angle: scalar_type, axis: Vec(3, scalar_type)) void {
             self.* = self.rotate(angle, axis);
-        }
-
-        /// Convert to a 4x4 matrix (GLM `mat4(mat)` constructor behavior):
-        /// smaller shapes are padded with zeroes and a `1` in the (3,3)
-        /// slot, reproducing GLM's historical padding quirks exactly
-        /// (verified against GLM 1.1 ref output). Use to lift a 2D/3D
-        /// transform into homogeneous space.
-        pub fn toMat4(self: Self) Mat(4, 4, scalar_type) {
-            if (comptime num_columns == 4 and num_rows == 4) return self;
-            const c0 = self.data[0];
-            const c1 = self.data[1];
-            if (comptime num_columns >= 3 and num_rows >= 3) {
-                // 3x3 / 3x4 / 4x3
-                if (comptime num_rows == 4) {
-                    return Mat(4, 4, scalar_type).init(.{ c0, c1, self.data[2], Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }) });
-                } else if (comptime num_rows == 3) {
-                    return Mat(4, 4, scalar_type).init(.{
-                        Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], c0.v[2], 0 }),
-                        Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], c1.v[2], 0 }),
-                        Vec(4, scalar_type).init(.{ self.data[2].v[0], self.data[2].v[1], self.data[2].v[2], 0 }),
-                        Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }),
-                    });
-                } else {
-                    @compileError("toMat4: unsupported shape");
-                }
-            } else if (comptime num_columns == 3 and num_rows == 2) {
-                return Mat(4, 4, scalar_type).init(.{
-                    Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], 0, 0 }),
-                    Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], 0, 0 }),
-                    Vec(4, scalar_type).init(.{ self.data[2].v[0], self.data[2].v[1], 1, 0 }),
-                    Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }),
-                });
-            } else if (comptime num_columns == 4 and num_rows == 2) {
-                return Mat(4, 4, scalar_type).init(.{
-                    Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], 0, 0 }),
-                    Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], 0, 0 }),
-                    Vec(4, scalar_type).init(.{ 0, 0, 1, 0 }),
-                    Vec(4, scalar_type).init(.{ 0, 0, 0, 1 }),
-                });
-            } else if (comptime num_columns == 2) {
-                const pad2 = Vec(4, scalar_type).init(.{ 0, 0, 1, 0 });
-                const pad3 = Vec(4, scalar_type).init(.{ 0, 0, 0, 1 });
-                if (comptime num_rows == 4) {
-                    return Mat(4, 4, scalar_type).init(.{ c0, c1, pad2, pad3 });
-                } else if (comptime num_rows == 3) {
-                    return Mat(4, 4, scalar_type).init(.{
-                        Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], c0.v[2], 0 }),
-                        Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], c1.v[2], 0 }),
-                        pad2,
-                        pad3,
-                    });
-                } else {
-                    return Mat(4, 4, scalar_type).init(.{
-                        Vec(4, scalar_type).init(.{ c0.v[0], c0.v[1], 0, 0 }),
-                        Vec(4, scalar_type).init(.{ c1.v[0], c1.v[1], 0, 0 }),
-                        pad2,
-                        pad3,
-                    });
-                }
-            } else {
-                @compileError("toMat4: unsupported shape");
-            }
         }
 
         // ---- printing ----
