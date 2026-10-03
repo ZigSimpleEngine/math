@@ -255,13 +255,13 @@ test "mat transforms" {
         0, 0, 1, 0,
         1, 2, 3, 1,
     }, 1e-6);
-    try expectMat4Approx(id.rotate(0.5, vec3.init(.{ 0, 1, 0 })), .{
+    try expectMat4Approx(id.rotateRad(0.5, vec3.init(.{ 0, 1, 0 })), .{
         0.87758255, 0, -0.47942555, 0,
         0, 1, 0, 0,
         0.47942555, 0, 0.87758255, 0,
         0, 0, 0, 1,
     }, 1e-6);
-    try expectMat4Approx(id.rotate(0.5, vec3.init(.{ 1, 0, 0 })), .{
+    try expectMat4Approx(id.rotateRad(0.5, vec3.init(.{ 1, 0, 0 })), .{
         1, 0, 0, 0,
         0, 0.87758255, 0.47942555, 0,
         0, -0.47942555, 0.87758255, 0,
@@ -273,7 +273,7 @@ test "mat transforms" {
         0, 0, 4, 0,
         0, 0, 0, 1,
     }, 1e-6);
-    const tt = id.translate(vec3.init(.{ 1, 2, 3 })).rotate(0.5, vec3.init(.{ 0, 1, 0 }));
+    const tt = id.translate(vec3.init(.{ 1, 2, 3 })).rotateRad(0.5, vec3.init(.{ 0, 1, 0 }));
     try expectMat4Approx(tt, .{
         0.87758255, 0, -0.47942555, 0,
         0, 1, 0, 0,
@@ -300,19 +300,19 @@ test "mat lookAt clip" {
     }, 1e-6);
     const fovy = 0.78539816339744830961;
     const aspect = 16.0 / 9.0;
-    try expectMat4Approx(mat.perspective(fovy, aspect, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveRad(fovy, aspect, 0.1, 100.0), .{
         1.35799515, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -1.002002, -1,
         0, 0, -0.2002002, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveRH_ZO(fovy, aspect, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveRH_ZORad(fovy, aspect, 0.1, 100.0), .{
         1.35799515, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -1.001001, -1,
         0, 0, -0.1001001, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveLH_ZO(fovy, aspect, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveLH_ZORad(fovy, aspect, 0.1, 100.0), .{
         1.35799515, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, 1.001001, 1,
@@ -406,25 +406,25 @@ test "mat clip variants" {
         0, 0, -0.2002002, 0,
     }, 1e-6);
 
-    try expectMat4Approx(mat.perspectiveRH_NO(fovy, aspect, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveRH_NORad(fovy, aspect, 0.1, 100.0), .{
         pz[0], pz[1], pz[2], pz[3],
         p1[0], p1[1], p1[2], p1[3],
         0, 0, -1.002002, -1,
         0, 0, -0.2002002, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveLH_NO(fovy, aspect, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveLH_NORad(fovy, aspect, 0.1, 100.0), .{
         pz[0], pz[1], pz[2], pz[3],
         p1[0], p1[1], p1[2], p1[3],
         0, 0, 1.002002, 1,
         0, 0, -0.2002002, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveZO(fovy, aspect, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveZORad(fovy, aspect, 0.1, 100.0), .{
         pz[0], pz[1], pz[2], pz[3],
         p1[0], p1[1], p1[2], p1[3],
         0, 0, -1.001001, -1,
         0, 0, -0.1001001, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveLH(fovy, aspect, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveLHRad(fovy, aspect, 0.1, 100.0), .{
         pz[0], pz[1], pz[2], pz[3],
         p1[0], p1[1], p1[2], p1[3],
         0, 0, 1.002002, 1,
@@ -432,68 +432,68 @@ test "mat clip variants" {
     }, 1e-6);
 
     const fov = 0.78539816339744830961;
-    try expectMat4Approx(mat.perspectiveFov(fov, 1280.0, 720.0, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveFovRad(fov, 1280.0, 720.0, 0.1, 100.0), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -1.002002, -1,
         0, 0, -0.2002002, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveFovRH_ZO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveFovRH_ZORad(fov, 1280.0, 720.0, 0.1, 100.0), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -1.001001, -1,
         0, 0, -0.1001001, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveFovLH_ZO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveFovLH_ZORad(fov, 1280.0, 720.0, 0.1, 100.0), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, 1.001001, 1,
         0, 0, -0.1001001, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveFovLH_NO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveFovLH_NORad(fov, 1280.0, 720.0, 0.1, 100.0), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, 1.002002, 1,
         0, 0, -0.2002002, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.perspectiveFovZO(fov, 1280.0, 720.0, 0.1, 100.0), .{
+    try expectMat4Approx(mat.perspectiveFovZORad(fov, 1280.0, 720.0, 0.1, 100.0), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -1.001001, -1,
         0, 0, -0.1001001, 0,
     }, 1e-6);
 
-    try expectMat4Approx(mat.infinitePerspective(fovy, aspect, 0.1), .{
+    try expectMat4Approx(mat.infinitePerspectiveRad(fovy, aspect, 0.1), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -1, -1,
         0, 0, -0.200000003, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.infinitePerspectiveRH_ZO(fovy, aspect, 0.1), .{
+    try expectMat4Approx(mat.infinitePerspectiveRH_ZORad(fovy, aspect, 0.1), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -1, -1,
         0, 0, -0.100000001, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.infinitePerspectiveLH_ZO(fovy, aspect, 0.1), .{
+    try expectMat4Approx(mat.infinitePerspectiveLH_ZORad(fovy, aspect, 0.1), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, 1, 1,
         0, 0, -0.100000001, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.infinitePerspectiveLH_NO(fovy, aspect, 0.1), .{
+    try expectMat4Approx(mat.infinitePerspectiveLH_NORad(fovy, aspect, 0.1), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, 1, 1,
         0, 0, -0.200000003, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.tweakedInfinitePerspective(fovy, aspect, 0.1, std.math.floatEps(f32)), .{
+    try expectMat4Approx(mat.tweakedInfinitePerspectiveRad(fovy, aspect, 0.1, std.math.floatEps(f32)), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -0.999999881, -1,
         0, 0, -0.199999988, 0,
     }, 1e-6);
-    try expectMat4Approx(mat.tweakedInfinitePerspective(fovy, aspect, 0.1, 0.001), .{
+    try expectMat4Approx(mat.tweakedInfinitePerspectiveRad(fovy, aspect, 0.1, 0.001), .{
         1.35799503, 0, 0, 0,
         0, 2.41421342, 0, 0,
         0, 0, -0.999000013, -1,
@@ -504,7 +504,7 @@ test "mat clip variants" {
 test "mat projection" {
     const fovy = 0.78539816339744830961;
     const aspect = 16.0 / 9.0;
-    const proj = mat.perspective(fovy, aspect, 0.1, 100.0);
+    const proj = mat.perspectiveRad(fovy, aspect, 0.1, 100.0);
     const model = mat4.identity().translate(vec3.init(.{ 1, 2, 3 }));
     const vp = vec4.init(.{ 0, 0, 800, 600 });
     const obj = vec3.init(.{ 1, 2, 3 });
@@ -534,7 +534,7 @@ test "mat projection" {
 
 test "mat common relational inverse" {
     const A = mat4.diag(2).translate(vec3.init(.{ 1, 2, 3 }));
-    const B = mat4.identity().rotate(0.5, vec3.init(.{ 0, 1, 0 }));
+    const B = mat4.identity().rotateRad(0.5, vec3.init(.{ 0, 1, 0 }));
     try expectMat4Approx(A.abs(), .{
         2, 0, 0, 0,
         0, 2, 0, 0,
@@ -746,19 +746,19 @@ fn expectQuatApprox(actual: anytype, expected: [4]f32, tolerance: f32) !void {
 // ---- quaternions ----
 
 test "quat" {
-    const q = quat.angleAxis(0.5, vec3.init(.{ 0, 1, 0 }));
+    const q = quat.angleAxisRad(0.5, vec3.init(.{ 0, 1, 0 }));
     try expectQuatApprox(q, .{ 0.968912423, 0, 0.247403964, 0 }, 1e-6);
-    try expectQuatApprox(q.mul(quat.angleAxis(0.3, vec3.init(.{ 1, 0, 0 }))), .{ 0.958032608, 0.144792467, 0.244625881, -0.0369715877 }, 1e-6);
+    try expectQuatApprox(q.mul(quat.angleAxisRad(0.3, vec3.init(.{ 1, 0, 0 }))), .{ 0.958032608, 0.144792467, 0.244625881, -0.0369715877 }, 1e-6);
     try expectQuatApprox(q.conjugate(), .{ 0.968912423, 0, -0.247403964, 0 }, 1e-6);
     try expectQuatApprox(q.inverse(), .{ 0.968912423, 0, -0.247403964, 0 }, 1e-6);
     const mv = q.mulVec3(vec3.init(.{ 1, 0, 0 }));
     try expectVecApprox(mv, vec3.init(.{ 0.87758255, 0, -0.47942555 }), 1e-6);
-    try std.testing.expectApproxEqAbs(@as(f32, 0.958032608), q.dot(quat.angleAxis(0.3, vec3.init(.{ 1, 0, 0 }))), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.958032608), q.dot(quat.angleAxisRad(0.3, vec3.init(.{ 1, 0, 0 }))), 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 1), q.length(), 1e-6);
 }
 
 test "quat mat" {
-    const q = quat.angleAxis(0.5, vec3.init(.{ 0, 1, 0 }));
+    const q = quat.angleAxisRad(0.5, vec3.init(.{ 0, 1, 0 }));
     const m3 = quat.mat3_cast(q);
     inline for (0..3) |c| inline for (0..3) |r| {
         const exp = [3][3]f32{
@@ -778,7 +778,7 @@ test "quat mat" {
 }
 
 test "quat interp" {
-    const q = quat.angleAxis(0.5, vec3.init(.{ 0, 1, 0 }));
+    const q = quat.angleAxisRad(0.5, vec3.init(.{ 0, 1, 0 }));
     const id = Quat(f32).identity();
     try expectQuatApprox(quat.slerp(id, q, 0.25), .{ 0.998047471, 0, 0.0624593161, 0 }, 1e-6);
     try expectQuatApprox(quat.lerp(id, q, 0.25), .{ 0.992228091, 0, 0.0618509911, 0 }, 1e-6);
@@ -786,25 +786,64 @@ test "quat interp" {
 }
 
 test "quat angle axis euler" {
-    const q = quat.angleAxis(0.5, vec3.init(.{ 0, 1, 0 }));
-    try std.testing.expectApproxEqAbs(@as(f32, 0.5), quat.angle(q), 1e-6);
+    const q = quat.angleAxisRad(0.5, vec3.init(.{ 0, 1, 0 }));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), quat.angleRad(q), 1e-6);
     try expectVecApprox(quat.axis(q), vec3.init(.{ 0, 1, 0 }), 1e-6);
-    const e = quat.eulerAngles(quat.angleAxis(0.5, vec3.init(.{ 1, 2, 3 })));
+    const e = quat.eulerAnglesRad(quat.angleAxisRad(0.5, vec3.init(.{ 1, 2, 3 })));
     try expectVecApprox(e, vec3.init(.{ 0.798036993, 0.633040369, 1.4500128 }), 1e-6);
-    try expectQuatApprox(Quat(f32).fromEuler(vec3.init(.{ 0.5, 0.3, 0.2 })), .{ 0.956937492, 0.228948653, 0.168490946, 0.0588567853 }, 1e-6);
-    const rv = quat.rotate(q, 0.5, vec3.init(.{ 1, 0, 0 })).mulVec3(vec3.init(.{ 1, 0, 0 }));
+    try expectQuatApprox(Quat(f32).fromEulerRad(vec3.init(.{ 0.5, 0.3, 0.2 })), .{ 0.956937492, 0.228948653, 0.168490946, 0.0588567853 }, 1e-6);
+    const rv = quat.rotateRad(q, 0.5, vec3.init(.{ 1, 0, 0 })).mulVec3(vec3.init(.{ 1, 0, 0 }));
     try expectVecApprox(rv, vec3.init(.{ 0.87758255, 7.4505806e-09, -0.47942555 }), 1e-6);
     try expectQuatApprox(Quat(f32).init(2, 1, 0.5, 0.25).normalize(), .{ 0.867721856, 0.433860928, 0.216930464, 0.108465232 }, 1e-6);
 }
 
+test "quat deg variants" {
+    const y_axis = vec3.init(.{ 0, 1, 0 });
+    // Deg twins agree with Rad twins fed converted values.
+    try expectQuatApprox(quat.angleAxisDeg(90, y_axis), .{ 0.707106781, 0, 0.707106781, 0 }, 1e-6);
+    try expectQuatApprox(quat.angleAxisDeg(@as(f32, 90), y_axis), .{ 0.707106781, 0, 0.707106781, 0 }, 1e-6);
+    try expectQuatApprox(quat.rotateDeg(Quat(f32).identity(), 90, y_axis), .{ 0.707106781, 0, 0.707106781, 0 }, 1e-6);
+    try expectQuatApprox(Quat(f32).fromEulerDeg(vec3.init(.{ 90, 0, 0 })), .{ 0.707106781, 0.707106781, 0, 0 }, 1e-5);
+    const q = quat.angleAxisRad(0.5, y_axis);
+    try std.testing.expectApproxEqAbs(quat.angleDeg(q), quat.angleRad(q) * @as(f32, 180) / @as(f32, std.math.pi), 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 90), quat.angleDeg(quat.angleAxisDeg(90, y_axis)), 1e-4);
+    try expectVecApprox(quat.eulerAnglesDeg(Quat(f32).fromEulerDeg(vec3.init(.{ 30, 45, 60 }))), vec3.init(.{ 30, 45, 60 }), 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 30), quat.pitchDeg(Quat(f32).fromEulerDeg(vec3.init(.{ 30, 0, 0 }))), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 45), quat.yawDeg(Quat(f32).fromEulerDeg(vec3.init(.{ 0, 45, 0 }))), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 60), quat.rollDeg(Quat(f32).fromEulerDeg(vec3.init(.{ 0, 0, 60 }))), 1e-4);
+}
+
+test "mat deg variants" {
+    const y_axis = vec3.init(.{ 0, 1, 0 });
+    const expected_rot_y90 = [4][4]f32{
+        .{ 0, 0, -1, 0 },
+        .{ 0, 1, 0, 0 },
+        .{ 1, 0, 0, 0 },
+        .{ 0, 0, 0, 1 },
+    };
+    try expectMatApprox(mat4.identity().rotateDeg(90, y_axis), expected_rot_y90, 1e-5);
+    var m = mat4.identity();
+    m.rotateSelfDeg(90, y_axis);
+    try expectMatApprox(m, expected_rot_y90, 1e-5);
+    const mr = mat4.identity().rotateRad(std.math.pi / 2.0, y_axis);
+    inline for (0..4) |c| inline for (0..4) |r| {
+        try std.testing.expectApproxEqAbs(mr.data[c].v[r], m.data[c].v[r], 1e-5);
+    };
+    const pd = mat.perspectiveDeg(60, 16.0 / 9.0, 0.1, 100.0);
+    const pr = mat.perspectiveRad(std.math.degreesToRadians(60.0), 16.0 / 9.0, 0.1, 100.0);
+    inline for (0..4) |c| inline for (0..4) |r| {
+        try std.testing.expectApproxEqAbs(pr.data[c].v[r], pd.data[c].v[r], 1e-6);
+    };
+}
+
 test "quat exp log pow" {
-    const q = quat.angleAxis(0.5, vec3.init(.{ 0, 1, 0 }));
+    const q = quat.angleAxisRad(0.5, vec3.init(.{ 0, 1, 0 }));
     try expectQuatApprox(quat.exp(q), .{ 0.969551444, 0, 0.244887799, 0 }, 1e-6);
     try expectQuatApprox(quat.log(q), .{ 0, 0, 0.25, 0 }, 1e-6);
     try expectQuatApprox(quat.log(Quat(f32).init(-0.5, 0, 0, 0)), .{ -0.693147182, 3.14159274, 0, 0 }, 1e-6);
     try expectQuatApprox(quat.pow(q, 2.5), .{ 0.810963094, 0, 0.585097253, 0 }, 1e-6);
     try expectQuatApprox(quat.sqrt(q), .{ 0.992197692, 0, 0.12467473, 0 }, 1e-6);
-    const q2 = quat.angleAxis(0.3, vec3.init(.{ 1, 0, 0 }));
+    const q2 = quat.angleAxisRad(0.3, vec3.init(.{ 1, 0, 0 }));
     try std.testing.expectEqual(@as(@Vector(4, bool), .{ true, true, true, true }), quat.equal(q, q).v);
     try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, true, false }), quat.equal(q, q2).v);
     try std.testing.expectEqual(@as(@Vector(4, bool), .{ false, false, true, true }), quat.equalEps(q, q2, 0.1).v);

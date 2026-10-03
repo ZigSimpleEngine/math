@@ -483,7 +483,7 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         /// rotation is applied before `self`'s translation, i.e. around the
         /// origin of `self`. Counter-clockwise for positive angles around
         /// the positive axis (right-handed convention).
-        pub fn rotate(self: Self, angle: scalar_type, axis: Vec(3, scalar_type)) Self {
+        pub fn rotateRad(self: Self, angle: scalar_type, axis: Vec(3, scalar_type)) Self {
             if (comptime num_columns != 4 or num_rows != 4) @compileError("rotate requires a 4x4 matrix");
             const c = scalar.cos(angle);
             const s = scalar.sin(angle);
@@ -513,9 +513,20 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
             return res;
         }
 
-        /// In-place rotate; `self` is overwritten with `rotate`.
-        pub fn rotateSelf(self: *Self, angle: scalar_type, axis: Vec(3, scalar_type)) void {
-            self.* = self.rotate(angle, axis);
+        /// In-place rotate (radians); `self` is overwritten with `rotateRad`.
+        pub fn rotateSelfRad(self: *Self, angle: scalar_type, axis: Vec(3, scalar_type)) void {
+            self.* = self.rotateRad(angle, axis);
+        }
+
+        /// Append a rotation of `angle` degrees around `axis`: converts to
+        /// radians and delegates to `rotateRad`.
+        pub fn rotateDeg(self: Self, angle: scalar_type, axis: Vec(3, scalar_type)) Self {
+            return self.rotateRad(scalar.radians(angle), axis);
+        }
+
+        /// In-place rotate (degrees); `self` is overwritten with `rotateDeg`.
+        pub fn rotateSelfDeg(self: *Self, angle: scalar_type, axis: Vec(3, scalar_type)) void {
+            self.* = self.rotateDeg(angle, axis);
         }
 
         // ---- printing ----
@@ -726,7 +737,7 @@ pub fn lookAtLH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 /// view `fovy` (radians) and `aspect = width/height` into clip
 /// space, with the near plane at z = −zNear. This is the usual
 /// OpenGL camera projection; Vulkan/Metal want the ZO variant.
-pub fn perspective(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+pub fn perspectiveRad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -737,11 +748,17 @@ pub fn perspective(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return res;
 }
 
+/// Perspective projection with `fovy` in degrees: converts to radians
+/// and delegates to `perspectiveRad`.
+pub fn perspectiveDeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRad(scalar.radians(fovy), aspect, zNear, zFar);
+}
+
 /// Right-handed perspective with NDC z in [0, 1] (GLM
 /// `perspectiveRH_ZO`): the depth output of Vulkan and Metal
 /// (D3D-style) pipelines, so the depth buffer contains positive z
 /// in [0, 1] with a reverse-friendly layout.
-pub fn perspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+pub fn perspectiveRH_ZORad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -752,11 +769,17 @@ pub fn perspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return res;
 }
 
+/// Right-handed perspective with NDC z in [0, 1] and `fovy` in degrees:
+/// converts to radians and delegates to `perspectiveRH_ZORad`.
+pub fn perspectiveRH_ZODeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRH_ZORad(scalar.radians(fovy), aspect, zNear, zFar);
+}
+
 /// Left-handed perspective with NDC z in [0, 1] (GLM
 /// `perspectiveLH_ZO`): z points into the scene, positive depth —
 /// the combination used by many engines that flip z to get
 /// right-handed rendering with a D3D-style depth range.
-pub fn perspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+pub fn perspectiveLH_ZORad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -765,6 +788,12 @@ pub fn perspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     res.data[2].v[3] = 1;
     res.data[3].v[2] = -(zFar * zNear) / (zFar - zNear);
     return res;
+}
+
+/// Left-handed perspective with NDC z in [0, 1] and `fovy` in degrees:
+/// converts to radians and delegates to `perspectiveLH_ZORad`.
+pub fn perspectiveLH_ZODeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveLH_ZORad(scalar.radians(fovy), aspect, zNear, zFar);
 }
 
 /// Orthographic projection (GLM `ortho`, default = right-handed, NDC
@@ -786,7 +815,7 @@ pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32
 
 /// Right-handed ortho with NDC z in [0, 1] (GLM `orthoRH_ZO`): the
 /// depth half-range is compressed to [0, 1] with the near plane at
-/// z = 0 — pair with `perspectiveRH_ZO` for consistent depth
+/// z = 0 — pair with `perspectiveRH_ZORad` for consistent depth
 /// conventions in a D3D-style renderer.
 pub fn orthoRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
@@ -804,7 +833,7 @@ pub fn orthoRH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar
 /// [-1, 1]): the general asymmetric perspective, defined by an
 /// arbitrary near clipping rectangle instead of a symmetric fov.
 /// Concave/degenerate boxes (left ≥ right etc.) produce singular
-/// matrices; `perspective` is the common specialization.
+/// matrices; `perspectiveRad` is the common specialization.
 pub fn frustum(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.zero();
     res.data[0].v[0] = (2 * zNear) / (right - left);
@@ -826,16 +855,22 @@ pub fn lookAtRH(eye: Vec(3, f32), center: Vec(3, f32), up: Vec(3, f32)) mat4 {
 
 /// Right-handed perspective with NDC z in [-1, 1] (GLM
 /// `perspectiveRH_NO`): GLM's default, therefore identical to
-/// `perspective`; use OpenGL-style depth as usual.
-pub fn perspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-    return perspective(fovy, aspect, zNear, zFar);
+/// `perspectiveRad`; use OpenGL-style depth as usual.
+pub fn perspectiveRH_NORad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRad(fovy, aspect, zNear, zFar);
+}
+
+/// Right-handed perspective with NDC z in [-1, 1] and `fovy` in degrees:
+/// converts to radians and delegates to `perspectiveRH_NORad`.
+pub fn perspectiveRH_NODeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRH_NORad(scalar.radians(fovy), aspect, zNear, zFar);
 }
 
 /// Left-handed perspective with NDC z in [-1, 1] (GLM
 /// `perspectiveLH_NO`): forward is +z (into the scene) while depth
 /// keeps OpenGL's symmetric range — matches the flipped-z trick
 /// engines use for better precision without going ZO.
-pub fn perspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+pub fn perspectiveLH_NORad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     const tan_half_fovy = scalar.tan(fovy / 2);
     var res = mat4.zero();
     res.data[0].v[0] = 1 / (aspect * tan_half_fovy);
@@ -846,30 +881,60 @@ pub fn perspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
     return res;
 }
 
+/// Left-handed perspective with NDC z in [-1, 1] and `fovy` in degrees:
+/// converts to radians and delegates to `perspectiveLH_NORad`.
+pub fn perspectiveLH_NODeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveLH_NORad(scalar.radians(fovy), aspect, zNear, zFar);
+}
+
 /// Zoom-variant perspective (GLM `perspectiveZO`; default clip control
-/// is RH so this equals `perspectiveRH_ZO`). Named for the NDC
+/// is RH so this equals `perspectiveRH_ZORad`). Named for the NDC
 /// [0, 1] depth range; use in Vulkan/Metal pipelines.
-pub fn perspectiveZO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-    return perspectiveRH_ZO(fovy, aspect, zNear, zFar);
+pub fn perspectiveZORad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRH_ZORad(fovy, aspect, zNear, zFar);
+}
+
+/// Zoom-variant perspective with `fovy` in degrees: converts to radians
+/// and delegates to `perspectiveZORad`.
+pub fn perspectiveZODeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveZORad(scalar.radians(fovy), aspect, zNear, zFar);
 }
 
 /// Negative-to-one NDC perspective (GLM `perspectiveNO`; equals
-/// `perspective`, the OpenGL default). The "NO" = [-1, 1] depth
+/// `perspectiveRad`, the OpenGL default). The "NO" = [-1, 1] depth
 /// range convention that GLM's aliases default to.
-pub fn perspectiveNO(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-    return perspective(fovy, aspect, zNear, zFar);
+pub fn perspectiveNORad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRad(fovy, aspect, zNear, zFar);
+}
+
+/// Negative-to-one NDC perspective with `fovy` in degrees: converts to
+/// radians and delegates to `perspectiveNORad`.
+pub fn perspectiveNODeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveNORad(scalar.radians(fovy), aspect, zNear, zFar);
 }
 
 /// Left-handed perspective alias (GLM `perspectiveLH`; GLM's default
-/// LH clip control is NO, so this equals `perspectiveLH_NO`).
-pub fn perspectiveLH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-    return perspectiveLH_NO(fovy, aspect, zNear, zFar);
+/// LH clip control is NO, so this equals `perspectiveLH_NORad`).
+pub fn perspectiveLHRad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveLH_NORad(fovy, aspect, zNear, zFar);
+}
+
+/// Left-handed perspective alias with `fovy` in degrees: converts to
+/// radians and delegates to `perspectiveLHRad`.
+pub fn perspectiveLHDeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveLHRad(scalar.radians(fovy), aspect, zNear, zFar);
 }
 
 /// Right-handed perspective alias (GLM `perspectiveRH`; GLM's default
-/// RH clip control is NO, so this equals `perspective`).
-pub fn perspectiveRH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
-    return perspective(fovy, aspect, zNear, zFar);
+/// RH clip control is NO, so this equals `perspectiveRad`).
+pub fn perspectiveRHRad(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRad(fovy, aspect, zNear, zFar);
+}
+
+/// Right-handed perspective alias with `fovy` in degrees: converts to
+/// radians and delegates to `perspectiveRHRad`.
+pub fn perspectiveRHDeg(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveRHRad(scalar.radians(fovy), aspect, zNear, zFar);
 }
 
 /// Right-handed fov-from-size perspective with NDC z in [0, 1] (GLM
@@ -877,7 +942,7 @@ pub fn perspectiveRH(fovy: f32, aspect: f32, zNear: f32, zFar: f32) mat4 {
 /// view in radians, and the frustum is derived from a pixel
 /// `width` × `height` instead of an aspect ratio — use for
 /// render-to-texture cameras that must match a specific viewport.
-pub fn perspectiveFovRH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+pub fn perspectiveFovRH_ZORad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -889,10 +954,17 @@ pub fn perspectiveFovRH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
+/// Right-handed fov-from-size perspective with NDC z in [0, 1] and `fov`
+/// in degrees: converts to radians and delegates to
+/// `perspectiveFovRH_ZORad`.
+pub fn perspectiveFovRH_ZODeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRH_ZORad(scalar.radians(fov), width, height, zNear, zFar);
+}
+
 /// Right-handed fov-from-size perspective with NDC z in [-1, 1] (GLM
-/// `perspectiveFovRH_NO`): like `perspectiveFovRH_ZO` but with
+/// `perspectiveFovRH_NO`): like `perspectiveFovRH_ZORad` but with
 /// OpenGL's symmetric depth range.
-pub fn perspectiveFovRH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+pub fn perspectiveFovRH_NORad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -904,10 +976,17 @@ pub fn perspectiveFovRH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
+/// Right-handed fov-from-size perspective with NDC z in [-1, 1] and `fov`
+/// in degrees: converts to radians and delegates to
+/// `perspectiveFovRH_NORad`.
+pub fn perspectiveFovRH_NODeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRH_NORad(scalar.radians(fov), width, height, zNear, zFar);
+}
+
 /// Left-handed fov-from-size perspective with NDC z in [0, 1] (GLM
-/// `perspectiveFovLH_ZO`): LH counterpart of `perspectiveFovRH_ZO`
+/// `perspectiveFovLH_ZO`): LH counterpart of `perspectiveFovRH_ZORad`
 /// with positive depth — matches D3D12/Metal depth ranges.
-pub fn perspectiveFovLH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+pub fn perspectiveFovLH_ZORad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -919,9 +998,16 @@ pub fn perspectiveFovLH_ZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
+/// Left-handed fov-from-size perspective with NDC z in [0, 1] and `fov`
+/// in degrees: converts to radians and delegates to
+/// `perspectiveFovLH_ZORad`.
+pub fn perspectiveFovLH_ZODeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovLH_ZORad(scalar.radians(fov), width, height, zNear, zFar);
+}
+
 /// Left-handed fov-from-size perspective with NDC z in [-1, 1] (GLM
-/// `perspectiveFovLH_NO`): LH twin of `perspectiveFovRH_NO`.
-pub fn perspectiveFovLH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+/// `perspectiveFovLH_NO`): LH twin of `perspectiveFovRH_NORad`.
+pub fn perspectiveFovLH_NORad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
     const h = scalar.cos(0.5 * fov) / scalar.sin(0.5 * fov);
     const w = h * height / width;
     var res = mat4.zero();
@@ -933,34 +1019,71 @@ pub fn perspectiveFovLH_NO(fov: f32, width: f32, height: f32, zNear: f32, zFar: 
     return res;
 }
 
+/// Left-handed fov-from-size perspective with NDC z in [-1, 1] and `fov`
+/// in degrees: converts to radians and delegates to
+/// `perspectiveFovLH_NORad`.
+pub fn perspectiveFovLH_NODeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovLH_NORad(scalar.radians(fov), width, height, zNear, zFar);
+}
+
 /// Fov-from-size perspective default (GLM `perspectiveFov`; RH + NDC
-/// [-1, 1], so identical to `perspectiveFovRH_NO`).
-pub fn perspectiveFov(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
-    return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
+/// [-1, 1], so identical to `perspectiveFovRH_NORad`).
+pub fn perspectiveFovRad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRH_NORad(fov, width, height, zNear, zFar);
+}
+
+/// Fov-from-size perspective default with `fov` in degrees: converts to
+/// radians and delegates to `perspectiveFovRad`.
+pub fn perspectiveFovDeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRad(scalar.radians(fov), width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, zoom depth range (GLM `perspectiveFovZO`;
-/// equals `perspectiveFovRH_ZO` under GLM's default RH control).
-pub fn perspectiveFovZO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
-    return perspectiveFovRH_ZO(fov, width, height, zNear, zFar);
+/// equals `perspectiveFovRH_ZORad` under GLM's default RH control).
+pub fn perspectiveFovZORad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRH_ZORad(fov, width, height, zNear, zFar);
+}
+
+/// Fov-from-size perspective, zoom depth range, with `fov` in degrees:
+/// converts to radians and delegates to `perspectiveFovZORad`.
+pub fn perspectiveFovZODeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovZORad(scalar.radians(fov), width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, negative-to-one depth (GLM
-/// `perspectiveFovNO`; equals `perspectiveFovRH_NO`).
-pub fn perspectiveFovNO(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
-    return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
+/// `perspectiveFovNO`; equals `perspectiveFovRH_NORad`).
+pub fn perspectiveFovNORad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRH_NORad(fov, width, height, zNear, zFar);
+}
+
+/// Fov-from-size perspective, negative-to-one depth, with `fov` in
+/// degrees: converts to radians and delegates to `perspectiveFovNORad`.
+pub fn perspectiveFovNODeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovNORad(scalar.radians(fov), width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, left-handed (GLM `perspectiveFovLH`;
-/// GLM's LH default is NO, so this equals `perspectiveFovLH_NO`).
-pub fn perspectiveFovLH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
-    return perspectiveFovLH_NO(fov, width, height, zNear, zFar);
+/// GLM's LH default is NO, so this equals `perspectiveFovLH_NORad`).
+pub fn perspectiveFovLHRad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovLH_NORad(fov, width, height, zNear, zFar);
+}
+
+/// Fov-from-size perspective, left-handed, with `fov` in degrees:
+/// converts to radians and delegates to `perspectiveFovLHRad`.
+pub fn perspectiveFovLHDeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovLHRad(scalar.radians(fov), width, height, zNear, zFar);
 }
 
 /// Fov-from-size perspective, right-handed (GLM `perspectiveFovRH`;
-/// equals `perspectiveFovRH_NO` under GLM's RH default).
-pub fn perspectiveFovRH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
-    return perspectiveFovRH_NO(fov, width, height, zNear, zFar);
+/// equals `perspectiveFovRH_NORad` under GLM's RH default).
+pub fn perspectiveFovRHRad(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRH_NORad(fov, width, height, zNear, zFar);
+}
+
+/// Fov-from-size perspective, right-handed, with `fov` in degrees:
+/// converts to radians and delegates to `perspectiveFovRHRad`.
+pub fn perspectiveFovRHDeg(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32) mat4 {
+    return perspectiveFovRHRad(scalar.radians(fov), width, height, zNear, zFar);
 }
 
 /// Infinite-far-plane perspective, right-handed, NDC [-1, 1] (GLM
@@ -968,7 +1091,7 @@ pub fn perspectiveFovRH(fov: f32, width: f32, height: f32, zNear: f32, zFar: f32
 /// function maps zNear to the far end of the range and everything
 /// beyond it — good for starfields, large outdoor scenes and
 /// reverse-z setups that must never clip at a finite distance.
-pub fn infinitePerspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+pub fn infinitePerspectiveRH_NORad(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -981,13 +1104,20 @@ pub fn infinitePerspectiveRH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     res.data[2].v[3] = -1;
     res.data[3].v[2] = -2 * zNear;
     return res;
+}
+
+/// Infinite-far-plane perspective, right-handed, NDC [-1, 1], with `fovy`
+/// in degrees: converts to radians and delegates to
+/// `infinitePerspectiveRH_NORad`.
+pub fn infinitePerspectiveRH_NODeg(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return infinitePerspectiveRH_NORad(scalar.radians(fovy), aspect, zNear);
 }
 
 /// Infinite-far-plane perspective, right-handed, NDC [0, 1] (GLM
 /// `infinitePerspectiveRH_ZO`): like the NO variant but with
 /// Vulkan/Metal depth conventions; note the depth at zNear is 0,
 /// so a reverse-z depth buffer pairs naturally.
-pub fn infinitePerspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+pub fn infinitePerspectiveRH_ZORad(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -1002,10 +1132,17 @@ pub fn infinitePerspectiveRH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return res;
 }
 
+/// Infinite-far-plane perspective, right-handed, NDC [0, 1], with `fovy`
+/// in degrees: converts to radians and delegates to
+/// `infinitePerspectiveRH_ZORad`.
+pub fn infinitePerspectiveRH_ZODeg(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return infinitePerspectiveRH_ZORad(scalar.radians(fovy), aspect, zNear);
+}
+
 /// Infinite-far-plane perspective, left-handed, NDC [-1, 1] (GLM
 /// `infinitePerspectiveLH_NO`): LH twin of the RH_NO variant, for
 /// +z-forward engines that need unlimited draw distance.
-pub fn infinitePerspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+pub fn infinitePerspectiveLH_NORad(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -1020,10 +1157,17 @@ pub fn infinitePerspectiveLH_NO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return res;
 }
 
+/// Infinite-far-plane perspective, left-handed, NDC [-1, 1], with `fovy`
+/// in degrees: converts to radians and delegates to
+/// `infinitePerspectiveLH_NORad`.
+pub fn infinitePerspectiveLH_NODeg(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return infinitePerspectiveLH_NORad(scalar.radians(fovy), aspect, zNear);
+}
+
 /// Infinite-far-plane perspective, left-handed, NDC [0, 1] (GLM
 /// `infinitePerspectiveLH_ZO`): LH + ZO combination, e.g. for
 /// D3D12-style pipelines with unlimited far distance.
-pub fn infinitePerspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
+pub fn infinitePerspectiveLH_ZORad(fovy: f32, aspect: f32, zNear: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -1038,10 +1182,23 @@ pub fn infinitePerspectiveLH_ZO(fovy: f32, aspect: f32, zNear: f32) mat4 {
     return res;
 }
 
+/// Infinite-far-plane perspective, left-handed, NDC [0, 1], with `fovy`
+/// in degrees: converts to radians and delegates to
+/// `infinitePerspectiveLH_ZORad`.
+pub fn infinitePerspectiveLH_ZODeg(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return infinitePerspectiveLH_ZORad(scalar.radians(fovy), aspect, zNear);
+}
+
 /// Infinite perspective default (GLM `infinitePerspective`; RH + NDC
-/// [-1, 1], identical to `infinitePerspectiveRH_NO`).
-pub fn infinitePerspective(fovy: f32, aspect: f32, zNear: f32) mat4 {
-    return infinitePerspectiveRH_NO(fovy, aspect, zNear);
+/// [-1, 1], identical to `infinitePerspectiveRH_NORad`).
+pub fn infinitePerspectiveRad(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return infinitePerspectiveRH_NORad(fovy, aspect, zNear);
+}
+
+/// Infinite perspective default with `fovy` in degrees: converts to
+/// radians and delegates to `infinitePerspectiveRad`.
+pub fn infinitePerspectiveDeg(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return infinitePerspectiveRad(scalar.radians(fovy), aspect, zNear);
 }
 
 /// Infinite perspective with Lengyel's tweak (GLM
@@ -1049,7 +1206,7 @@ pub fn infinitePerspective(fovy: f32, aspect: f32, zNear: f32) mat4 {
 /// `ep` parameter (usually machine epsilon) replaces the far
 /// plane, removing the depth compression singularity that plain
 /// infinite projections suffer at z → zNear.
-pub fn tweakedInfinitePerspective(fovy: f32, aspect: f32, zNear: f32, epsilon: f32) mat4 {
+pub fn tweakedInfinitePerspectiveRad(fovy: f32, aspect: f32, zNear: f32, epsilon: f32) mat4 {
     const range = scalar.tan(fovy / 2) * zNear;
     const left = -range * aspect;
     const right = range * aspect;
@@ -1064,11 +1221,24 @@ pub fn tweakedInfinitePerspective(fovy: f32, aspect: f32, zNear: f32, epsilon: f
     return res;
 }
 
+/// Infinite perspective with Lengyel's tweak and `fovy` in degrees:
+/// converts to radians and delegates to `tweakedInfinitePerspectiveRad`.
+pub fn tweakedInfinitePerspectiveDeg(fovy: f32, aspect: f32, zNear: f32, epsilon: f32) mat4 {
+    return tweakedInfinitePerspectiveRad(scalar.radians(fovy), aspect, zNear, epsilon);
+}
+
 /// `tweakedInfinitePerspective` with `ep = f32 epsilon` (GLM
 /// `tweakedInfinitePerspectiveDefault`): the recommended instant;
 /// just pass fov/aspect/zNear.
-pub fn tweakedInfinitePerspectiveDefault(fovy: f32, aspect: f32, zNear: f32) mat4 {
-    return tweakedInfinitePerspective(fovy, aspect, zNear, std.math.floatEps(f32));
+pub fn tweakedInfinitePerspectiveDefaultRad(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return tweakedInfinitePerspectiveRad(fovy, aspect, zNear, std.math.floatEps(f32));
+}
+
+/// `tweakedInfinitePerspectiveRad` with `ep = f32 epsilon` and `fovy` in
+/// degrees: converts to radians and delegates to
+/// `tweakedInfinitePerspectiveDefaultRad`.
+pub fn tweakedInfinitePerspectiveDefaultDeg(fovy: f32, aspect: f32, zNear: f32) mat4 {
+    return tweakedInfinitePerspectiveDefaultRad(scalar.radians(fovy), aspect, zNear);
 }
 
 /// 2D orthographic projection (GLM `ortho(left, right, bottom, top)`):
@@ -1087,7 +1257,7 @@ pub fn ortho2D(left: f32, right: f32, bottom: f32, top: f32) mat4 {
 
 /// Left-handed ortho with NDC z in [0, 1] (GLM `orthoLH_ZO`): depth
 /// maps zNear → 0, zFar → 1 with +z forward — the D3D12-style
-/// ortho to pair with `perspectiveLH_ZO`.
+/// ortho to pair with `perspectiveLH_ZORad`.
 pub fn orthoLH_ZO(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) mat4 {
     var res = mat4.identity();
     res.data[0].v[0] = 2 / (right - left);
