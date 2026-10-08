@@ -46,7 +46,7 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         /// and the result of `matrix.sub(m)`; a projection built from scratch
         /// usually starts here before its few non-zero elements are placed.
         pub fn zero() Self {
-            return .{ .data = [_]Vec(num_rows, scalar_type){Vec(num_rows, scalar_type).zero()} ** num_columns };
+            return .{ .data = @splat(Vec(num_rows, scalar_type).zero()) };
         }
 
         /// Square identity matrix (GLM `mat(v)` with v=1): ones on the
@@ -62,7 +62,7 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
         /// elementwise variant). Useful to build per-element factors, e.g.
         /// GLM's matrix `mix` uses `ones() - a`.
         pub fn one(value: anytype) Self {
-            return .{ .data = [_]Vec(num_rows, scalar_type){Vec(num_rows, scalar_type).fill(scalar.cast(scalar_type, value))} ** num_columns };
+            return .{ .data = @splat(Vec(num_rows, scalar_type).fill(scalar.cast(scalar_type, value))) };
         }
 
         /// Matrix of all ones (GLM `mat(1)` fill style). Comes in handy as
@@ -148,8 +148,8 @@ pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scala
                     n += 1;
                 }
             } else {
-                inline for (@typeInfo(AT).@"struct".fields) |f| {
-                    const e = @field(args, f.name);
+                inline for (@typeInfo(AT).@"struct".field_names) |field_name| {
+                    const e = @field(args, field_name);
                     const ET = @TypeOf(e);
                     if (comptime isMat(ET)) @compileError("Mat init: a matrix can only be the single argument; convert it with init/toMat instead");
                     if (comptime vec.isVec(ET)) {

@@ -92,11 +92,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
                 return .{ .v = r };
             }
             if (comptime scalar.isNumber(AT)) return fill(args);
-            const fields = @typeInfo(AT).@"struct".fields;
+            const field_names = @typeInfo(AT).@"struct".field_names;
             var r: storage_type = undefined;
             comptime var n: usize = 0;
-            inline for (fields) |f| {
-                const e = @field(args, f.name);
+            inline for (field_names) |field_name| {
+                const e = @field(args, field_name);
                 const ET = @TypeOf(e);
                 if (comptime isVec(ET)) {
                     inline for (0..@TypeOf(e).len) |k| {

@@ -6,7 +6,7 @@ pub const Options = struct {
     /// The target architecture for which the module will be built.
     target: ?std.Build.ResolvedTarget = null,
     /// The optimization mode used to compile the module.
-    optimize: ?std.builtin.OptimizeMode = null,
+    optimize: ?std.lang.Optimize = null,
 
     pub fn initFromOptions(b: *std.Build) Options {
         return .{
