@@ -28,7 +28,10 @@ pub fn isMat(comptime candidate_type: type) bool {
 /// `mat4.identity()`, `Mat(3, 3, f32).zero()`, and the type exposes
 /// `cols`/`rows`/`col_type`/`row_type` metadata for generic code.
 pub fn Mat(comptime num_columns: usize, comptime num_rows: usize, comptime scalar_type: type) type {
-    return extern struct {
+    // Plain struct: columns are Vec (which contains @Vector), and Zig 0.17
+    // forbids vectors transitively in extern structs. Layout is unchanged
+    // (single array field).
+    return struct {
         pub const Self = @This();
         pub const cols: comptime_int = num_columns;
         pub const rows: comptime_int = num_rows;
