@@ -15,8 +15,12 @@ const vec2 = Vec(2, f32);
 const vec3 = Vec(3, f32);
 const vec4 = Vec(4, f32);
 const bvec3 = Vec(3, bool);
+const ivec2 = Vec(2, i32);
 const ivec3 = Vec(3, i32);
 const ivec4 = Vec(4, i32);
+const uvec2 = Vec(2, u32);
+const uvec3 = Vec(3, u32);
+const uvec4 = Vec(4, u32);
 const mat2 = Mat(2, 2, f32);
 const mat3 = Mat(3, 3, f32);
 const mat4 = Mat(4, 4, f32);
@@ -70,6 +74,26 @@ test "scalar common" {
     try std.testing.expectApproxEqAbs(@as(f32, 0), scalar.step(1.0, 0.5), 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), scalar.smoothstep(0.0, 1.0, 0.5), 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 7), scalar.fma(2.0, 3.0, 1.0), 1e-6);
+}
+
+test "scalar cast conversions" {
+    try std.testing.expectEqual(@as(u8, 255), scalar.cast(u8, @as(i32, -1)));
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), scalar.cast(u32, @as(i64, -1)));
+    try std.testing.expectEqual(@as(i8, -1), scalar.cast(i8, @as(i32, 255)));
+    try std.testing.expectEqual(@as(i8, 127), scalar.cast(i8, @as(i32, -129)));
+    try std.testing.expectEqual(@as(i64, -1), scalar.cast(i64, @as(i8, -1)));
+    try std.testing.expectEqual(@as(u64, std.math.maxInt(u64)), scalar.cast(u64, @as(i8, -1)));
+    try std.testing.expectEqual(@as(i64, 255), scalar.cast(i64, @as(u8, 255)));
+    try std.testing.expectEqual(@as(i32, -1), scalar.cast(i32, @as(u32, std.math.maxInt(u32))));
+    try std.testing.expectEqual(@as(u8, 44), scalar.cast(u8, 300));
+    try std.testing.expectEqual(@as(i8, -1), scalar.cast(i8, 255));
+    try std.testing.expectEqual(@as(i32, 1), scalar.cast(i32, @as(f64, 1.9)));
+    try std.testing.expectEqual(@as(i32, -1), scalar.cast(i32, @as(f64, -1.9)));
+    try std.testing.expectEqual(@as(i32, 3), scalar.cast(i32, 3.9));
+    try std.testing.expectEqual(@as(f32, 1.0), scalar.cast(f32, true));
+    try std.testing.expectEqual(@as(f32, 0.0), scalar.cast(f32, false));
+    try std.testing.expect(scalar.cast(bool, @as(i32, -2)));
+    try std.testing.expect(scalar.cast(bool, @as(f32, 0.5)));
 }
 
 test "scalar modf frexp ldexp" {
@@ -179,6 +203,148 @@ test "vec relational int" {
     try std.testing.expectEqual(true, gte.x());
     try std.testing.expectEqual(true, gte.y());
     try std.testing.expectEqual(false, gte.z());
+}
+
+test "vec init conversions" {
+    const from_float = ivec3.init(vec3.init(.{ 1.9, -1.9, 2.5 }));
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 1, -1, 2 }), from_float.v);
+
+    const from_signed = uvec3.init(ivec3.init(.{ -1, 0, 1 }));
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ std.math.maxInt(u32), 0, 1 }), from_signed.v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ -1, 0, 1 }), ivec3.init(from_signed).v);
+
+    try std.testing.expectEqual(@as(@Vector(3, i64), .{ -1, 2, 3 }), Vec(3, i64).init(ivec3.init(.{ -1, 2, 3 })).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 1, -1, 255 }), ivec3.init(Vec(3, i64).init(.{ 0x1_0000_0001, -1, 255 })).v);
+
+    try std.testing.expectEqual(@as(@Vector(3, bool), .{ false, true, true }), Vec(3, bool).init(ivec3.init(.{ 0, -2, 5 })).v);
+    try std.testing.expectEqual(@as(@Vector(3, f32), .{ 1, 0, 1 }), vec3.init(Vec(3, bool).init(.{ true, false, true })).v);
+
+    try std.testing.expectEqual(@as(@Vector(3, f32), .{ 1, 2, 3 }), vec3.init(vec4.init(.{ 1, 2, 3, 4 })).v);
+    try std.testing.expectEqual(
+        @as(@Vector(3, u32), .{ std.math.maxInt(u32), 2, std.math.maxInt(u32) }),
+        uvec3.init(.{ ivec3.init(.{ -1, 2, 3 }).xy(), @as(i32, -1) }).v,
+    );
+}
+
+test "vec integer arithmetic" {
+    const a = ivec3.init(.{ 7, -7, 3 });
+    const b = ivec3.init(.{ 2, 3, -2 });
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 9, -4, 1 }), a.add(b).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 5, -10, 5 }), a.sub(b).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 14, -21, -6 }), a.mul(b).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 3, -2, -1 }), a.div(b).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 1, -1, 1 }), a.mod(b).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ -7, 7, -3 }), a.neg().v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 9, -5, 5 }), a.add(2).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 5, -9, 1 }), a.sub(2).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 14, -14, 6 }), a.mul(2).v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 3, -3, 1 }), a.div(2).v);
+}
+
+test "vec integer wrapping" {
+    const umax = std.math.maxInt(u32);
+    const u = uvec3.init(.{ umax, 0, 1 });
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0, 1, 2 }), u.add(1).v);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ umax - 1, umax, 0 }), u.sub(1).v);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ umax - 1, 0, 2 }), u.mul(2).v);
+    try std.testing.expectEqual(@as(@Vector(2, u32), .{ umax - 1, umax }), uvec2.init(.{ 0, 1 }).sub(2).v);
+
+    try std.testing.expectEqual(
+        @as(@Vector(2, i32), .{ std.math.minInt(i32), std.math.minInt(i32) + 1 }),
+        ivec2.init(.{ std.math.maxInt(i32), std.math.minInt(i32) }).add(1).v,
+    );
+    try std.testing.expectEqual(@as(@Vector(2, i32), .{ -2, 4 }), ivec2.init(.{ std.math.maxInt(i32), 2 }).mul(2).v);
+    try std.testing.expectEqual(@as(@Vector(2, i32), .{ std.math.minInt(i32), -5 }), ivec2.init(.{ std.math.minInt(i32), 5 }).neg().v);
+    try std.testing.expectEqual(
+        @as(@Vector(2, i32), .{ std.math.minInt(i32), 3 }),
+        ivec2.init(.{ std.math.minInt(i32), 7 }).div(ivec2.init(.{ -1, 2 })).v,
+    );
+
+    try std.testing.expectEqual(@as(u32, 0), uvec2.init(.{ umax, 1 }).dot(uvec2.init(.{ 1, 1 })));
+    try std.testing.expectEqual(@as(u32, 0), uvec2.init(.{ umax, 1 }).compAdd());
+    try std.testing.expectEqual(@as(u32, 0), uvec2.init(.{ 0x8000_0000, 2 }).compMul());
+}
+
+test "vec integer common and bits" {
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0, 1, 1 }), uvec3.init(.{ 0, 5, std.math.maxInt(u32) }).sign().v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ -1, 0, 1 }), ivec3.init(.{ -2, 0, 3 }).sign().v);
+    try std.testing.expectEqual(
+        @as(@Vector(2, i32), .{ std.math.minInt(i32), 5 }),
+        ivec2.init(.{ std.math.minInt(i32), -5 }).abs().v,
+    );
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 0, 3, 2 }), ivec3.init(.{ -1, 5, 2 }).clamp(0, 3).v);
+    try std.testing.expectEqual(
+        @as(@Vector(3, i32), .{ 1, 3, -2 }),
+        ivec3.init(.{ 1, 5, -2 }).min(ivec3.init(.{ 2, 3, 0 })).v,
+    );
+    try std.testing.expectEqual(
+        @as(@Vector(3, i32), .{ 2, 5, 0 }),
+        ivec3.init(.{ 1, 5, -2 }).max(ivec3.init(.{ 2, 3, 0 })).v,
+    );
+
+    const lt = uvec3.init(.{ 1, 2, 3 }).lessThan(2);
+    try std.testing.expectEqual(@as(@Vector(3, bool), .{ true, false, false }), lt.v);
+    try std.testing.expect(lt.any());
+    try std.testing.expect(!lt.all());
+    try std.testing.expectEqual(
+        @as(@Vector(3, bool), .{ true, false, true }),
+        uvec3.init(.{ 1, 2, 3 }).equal(uvec3.init(.{ 1, 9, 3 })).v,
+    );
+
+    const bits = uvec3.init(.{ 0b1011, 0, std.math.maxInt(u32) });
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 3, 0, 32 }), bits.bitCount().v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 0, -1, 0 }), bits.findLSB().v);
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 3, -1, 31 }), bits.findMSB().v);
+
+    const bf = Vec(2, u8).init(.{ 0xD6, 0xFF });
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 10, 15 }), bf.bitfieldExtract(3, 4).v);
+    try std.testing.expectEqual(
+        @as(@Vector(2, u8), .{ 60, 60 }),
+        Vec(2, u8).zero().bitfieldInsert(@as(u8, 0b1111), 2, 4).v,
+    );
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x53, 0xFF }), Vec(2, u8).init(.{ 0xCA, 0xFF }).bitfieldReverse().v);
+
+    const carried = Vec(2, u8).init(.{ 250, 5 }).uaddCarry(Vec(2, u8).init(.{ 10, 5 }));
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 4, 10 }), carried.sum.v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 1, 0 }), carried.carry.v);
+    const borrowed = Vec(2, u8).init(.{ 3, 5 }).usubBorrow(Vec(2, u8).init(.{ 10, 5 }));
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 249, 0 }), borrowed.diff.v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 1, 0 }), borrowed.borrow.v);
+
+    try std.testing.expectEqual(@as(@Vector(3, bool), .{ true, false, true }), uvec3.init(.{ 4, 6, 8 }).isPowerOfTwo().v);
+    try std.testing.expectEqual(@as(@Vector(3, bool), .{ true, false, true }), uvec3.init(.{ 8, 9, 10 }).isMultiple(2).v);
+    try std.testing.expectEqual(@as(@Vector(2, u32), .{ 16, 16 }), uvec2.init(.{ 14, 15 }).nextMultiple(8).v);
+    try std.testing.expectEqual(@as(@Vector(2, u32), .{ 8, 8 }), uvec2.init(.{ 14, 15 }).prevMultiple(8).v);
+    try std.testing.expectEqual(@as(@Vector(2, u32), .{ 16, 4 }), uvec2.init(.{ 9, 3 }).ceilPowerOfTwo().v);
+    try std.testing.expectEqual(@as(@Vector(2, u32), .{ 8, 2 }), uvec2.init(.{ 9, 3 }).floorPowerOfTwo().v);
+
+    try std.testing.expectEqual(@as(i32, -2), ivec3.init(.{ 1, -2, 3 }).compMin());
+    try std.testing.expectEqual(@as(i32, 3), ivec3.init(.{ 1, -2, 3 }).compMax());
+}
+
+test "vec integer geometry" {
+    const iv = ivec2.init(.{ 3, 4 });
+    try std.testing.expectApproxEqAbs(@as(f32, 5), iv.length(), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), ivec2.zero().distance(iv), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2147483648.0), Vec(2, i32).init(.{ std.math.maxInt(i32), 0 }).length(), 1.0);
+
+    const a = uvec2.init(.{ 1, 2 });
+    const b = uvec2.init(.{ 5, 6 });
+    const expected_distance = @sqrt(@as(f32, 32));
+    try std.testing.expectApproxEqAbs(expected_distance, a.distance(b), 1e-6);
+    try std.testing.expectApproxEqAbs(expected_distance, b.distance(a), 1e-6);
+
+    const normalized = iv.normalize();
+    try std.testing.expect(Vec(2, f32) == @TypeOf(normalized));
+    try expectVecApprox(normalized, vec2.init(.{ 0.6, 0.8 }), 1e-6);
+    try expectVecApprox(uvec2.init(.{ 3, 4 }).normalize(), vec2.init(.{ 0.6, 0.8 }), 1e-6);
+
+    try std.testing.expectEqual(@as(i32, 32), ivec3.init(.{ 1, 2, 3 }).dot(ivec3.init(.{ 4, 5, 6 })));
+    try std.testing.expectEqual(@as(@Vector(3, i32), .{ 0, 0, 1 }), ivec3.init(.{ 1, 0, 0 }).cross(ivec3.init(.{ 0, 1, 0 })).v);
+    try std.testing.expectEqual(
+        @as(@Vector(3, u32), .{ 0, 0, std.math.maxInt(u32) }),
+        uvec3.init(.{ std.math.maxInt(u32), 0, 0 }).cross(uvec3.init(.{ 0, 1, 0 })).v,
+    );
 }
 
 // ---- matrices ----

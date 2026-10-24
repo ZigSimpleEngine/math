@@ -3,8 +3,8 @@
 //! Modules:
 //! - `scalar` — scalar math & helpers (float/int dispatch, trig,
 //!   exponential, bit ops, ULP comparisons, rounding utilities),
-//! - `vec` — vector math: `Vec(component_count, scalar_type)` (vec2/vec3/vec4-class vectors) with
-//!   per-component and geometric operations,
+//! - `vec` — vector math: `Vec(component_count, scalar_type)` (vec2/vec3/vec4-class vectors,
+//!   including signed/unsigned integer vectors) with per-component and geometric operations,
 //! - `mat` — matrix math: `Mat(num_columns, num_rows, scalar_type)` (column-major, GLM layout),
 //!   transforms and the perspective/ortho/frustum clip-space family,
 //! - `quat` — quaternions: `Quat(T)` with rotation composition,
@@ -28,8 +28,10 @@ pub const quat = @import("quat.zig");
 /// Constants module: `pi(T)`, `two_pi(T)`, `e(T)`, `golden_ratio(T)`, ...
 pub const constants = @import("constants.zig");
 
-/// Vector type alias: `Vec(3, f32)` is vec3, `Vec(4, i32)` is ivec4...
-/// Instantiate via `vec.Vec(L, T)` or this shortcut.
+/// Vector type alias: `Vec(3, f32)` is vec3, `Vec(4, i32)` is ivec4,
+/// `Vec(4, u32)` is uvec4... Instantiate via `vec.Vec(L, T)` or this shortcut.
+/// `init` converts between any scalar component types (including
+/// signed/unsigned integer wrapping).
 pub const Vec = vec.Vec;
 /// Matrix type alias: `Mat(4, 4, f32)` is mat4; shape is (columns, rows).
 pub const Mat = mat.Mat;

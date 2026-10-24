@@ -9,6 +9,15 @@
 //! as their argument (`v.mul(2)` works like `v.mul(vec2(2, 2))`), matching
 //! GLSL's mixed operand rules. Methods that delegate to `scalar.zig`
 //! replicate its NaN/rounding/ULP semantics.
+//!
+//! Integer vectors (`Vec(L, i32)`, `Vec(L, u32)`, ...) use the same API.
+//! Component arithmetic wraps on overflow, integer division/remainder
+//! truncate toward zero, and `length`/`normalize` promote integer lanes to
+//! the working float type before doing float math. `init` converts any vector
+//! component type to any other using C++/GLM rules (modulo 2^N for integer
+//! narrowing/signedness changes). Float-only operations (trigonometry,
+//! rounding, ULP helpers, float bit-casts, `inverse`, `smoothstep`) are
+//! compile errors when used with integer vectors.
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
@@ -80,8 +89,10 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         /// Build a vector from flexible arguments, GLM-constructor style:
         /// - a scalar: splatted into every component (`vec3.init(5)`),
-        /// - another vector: components copied in order (truncation
-        ///   happens naturally: `vec4.init(v3)` keeps the first three),
+        /// - another vector of any component type: components copied in order
+        ///   and converted with `scalar.cast` (so signed/unsigned wrap like
+        ///   C++/GLM). A longer source truncates (`vec3.init(v4)` keeps the
+        ///   first three); a shorter source is a compile error (`vec4.init(v3)`),
         /// - a tuple of scalars and/or vectors, concatenated in order:
         ///   `vec4.init(.{ v2, 1.0, 2.0 })`, `vec3.init(.{ v2, v2.x() })`.
         /// All values are cast to `scalar_type`. Use for building points/colors from
@@ -90,6 +101,8 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             const AT = @TypeOf(args);
             if (comptime AT == Self) return args;
             if (comptime isVec(AT)) {
+                if (comptime AT.len < component_count)
+                    @compileError("Vec init: source vector has fewer components than the destination");
                 var r: storage_type = undefined;
                 inline for (0..component_count) |i| r[i] = scalar.cast(scalar_type, args.v[i]);
                 return .{ .v = r };
@@ -319,14 +332,86 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             return .{ .v = r };
         }
 
+        // ---- arithmetic helpers ----
+
+        // Integer lanes use wrapping arithmetic (GLM/C++/GPU semantics); float
+        // lanes keep ordinary IEEE arithmetic. Unsupported component types
+        // (bool) fail at compile time if one of these helpers is instantiated.
+
+        inline fn addValues(left_hand_side: storage_type, right_hand_side: storage_type) storage_type {
+            return if (comptime scalar.isInt(scalar_type)) left_hand_side +% right_hand_side else left_hand_side + right_hand_side;
+        }
+
+        inline fn subValues(left_hand_side: storage_type, right_hand_side: storage_type) storage_type {
+            return if (comptime scalar.isInt(scalar_type)) left_hand_side -% right_hand_side else left_hand_side - right_hand_side;
+        }
+
+        inline fn mulValues(left_hand_side: storage_type, right_hand_side: storage_type) storage_type {
+            return if (comptime scalar.isInt(scalar_type)) left_hand_side *% right_hand_side else left_hand_side * right_hand_side;
+        }
+
+        inline fn addScalars(left_hand_side: scalar_type, right_hand_side: scalar_type) scalar_type {
+            return if (comptime scalar.isInt(scalar_type)) left_hand_side +% right_hand_side else left_hand_side + right_hand_side;
+        }
+
+        inline fn subScalars(left_hand_side: scalar_type, right_hand_side: scalar_type) scalar_type {
+            return if (comptime scalar.isInt(scalar_type)) left_hand_side -% right_hand_side else left_hand_side - right_hand_side;
+        }
+
+        inline fn mulScalars(left_hand_side: scalar_type, right_hand_side: scalar_type) scalar_type {
+            return if (comptime scalar.isInt(scalar_type)) left_hand_side *% right_hand_side else left_hand_side * right_hand_side;
+        }
+
+        inline fn divValues(left_hand_side: storage_type, right_hand_side: storage_type) storage_type {
+            if (comptime scalar.isInt(scalar_type) and scalar.isSigned(scalar_type)) {
+                var r: storage_type = undefined;
+                inline for (0..component_count) |i| {
+                    // minInt / -1 wraps to minInt instead of trapping.
+                    r[i] = if (right_hand_side[i] == -1) 0 -% left_hand_side[i] else @divTrunc(left_hand_side[i], right_hand_side[i]);
+                }
+                return r;
+            }
+            return left_hand_side / right_hand_side;
+        }
+
+        inline fn negValues(value: storage_type) storage_type {
+            if (comptime scalar.isUnsigned(scalar_type))
+                @compileError("neg is undefined for unsigned vectors");
+            return if (comptime scalar.isInt(scalar_type)) -%value else -value;
+        }
+
+        fn reduceAddValues(value: storage_type) scalar_type {
+            if (comptime scalar.isInt(scalar_type)) {
+                var result: scalar_type = 0;
+                inline for (0..component_count) |i| result = addScalars(result, value[i]);
+                return result;
+            }
+            return @reduce(.Add, value);
+        }
+
+        fn reduceMulValues(value: storage_type) scalar_type {
+            if (comptime scalar.isInt(scalar_type)) {
+                var result: scalar_type = 1;
+                inline for (0..component_count) |i| result = mulScalars(result, value[i]);
+                return result;
+            }
+            return @reduce(.Mul, value);
+        }
+
+        inline fn floatValues(self: Self) @Vector(component_count, float_type) {
+            if (comptime scalar_type == float_type) return self.v;
+            if (comptime scalar.isInt(scalar_type)) return @floatFromInt(self.v);
+            return @floatCast(self.v);
+        }
+
         // ---- arithmetic ----
 
         /// Component-wise addition. `right_hand_side` may be a vector (lane-wise) or a
         /// scalar (added to every lane): `pos.add(vel.mul(dt))`,
-        /// `v.add(1)`.
+        /// `v.add(1)`. Integer vectors wrap on overflow.
         pub inline fn add(self: Self, right_hand_side: anytype) Self {
-            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v + right_hand_side.v };
-            return .{ .v = self.v + @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = addValues(self.v, right_hand_side.v) };
+            return .{ .v = addValues(self.v, @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side)))) };
         }
 
         /// In-place component-wise addition; `self` is overwritten with `add`.
@@ -336,9 +421,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         /// Component-wise subtraction. `right_hand_side` may be a vector or a scalar:
         /// `a.sub(b)` == GLSL `a - b`. Use for displacement between points.
+        /// Integer vectors wrap on overflow (an unsigned subtraction that goes
+        /// below zero wraps around).
         pub inline fn sub(self: Self, right_hand_side: anytype) Self {
-            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v - right_hand_side.v };
-            return .{ .v = self.v - @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = subValues(self.v, right_hand_side.v) };
+            return .{ .v = subValues(self.v, @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side)))) };
         }
 
         /// In-place component-wise subtraction; `self` is overwritten with `sub`.
@@ -348,10 +435,10 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         /// Component-wise multiplication. `right_hand_side` may be a vector (Hadamard
         /// product, NOT the dot product — use `dot`) or a scalar: scaling a
-        /// direction by speed is `dir.mul(10)`.
+        /// direction by speed is `dir.mul(10)`. Integer vectors wrap on overflow.
         pub inline fn mul(self: Self, right_hand_side: anytype) Self {
-            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v * right_hand_side.v };
-            return .{ .v = self.v * @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = mulValues(self.v, right_hand_side.v) };
+            return .{ .v = mulValues(self.v, @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side)))) };
         }
 
         /// In-place component-wise multiplication; `self` is overwritten with `mul`.
@@ -360,9 +447,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         }
 
         /// Component-wise division. `right_hand_side` may be a vector or a scalar.
+        /// Integer division truncates toward zero; `minInt / -1` wraps to
+        /// `minInt`; division by zero still traps.
         pub inline fn div(self: Self, right_hand_side: anytype) Self {
-            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = self.v / right_hand_side.v };
-            return .{ .v = self.v / @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side))) };
+            if (comptime isVec(@TypeOf(right_hand_side))) return .{ .v = divValues(self.v, right_hand_side.v) };
+            return .{ .v = divValues(self.v, @as(storage_type, @splat(scalar.cast(scalar_type, right_hand_side)))) };
         }
 
         /// In-place component-wise division; `self` is overwritten with `div`.
@@ -370,9 +459,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
             self.* = self.div(right_hand_side);
         }
 
-        /// Negate every component: `v.neg()` == GLSL `-v`.
+        /// Negate every component: `v.neg()` == GLSL `-v`. Signed integer
+        /// vectors wrap (`minInt` negates to itself); unsigned vectors are a
+        /// compile error because they have no negative values.
         pub inline fn neg(self: Self) Self {
-            return .{ .v = -self.v };
+            return .{ .v = negValues(self.v) };
         }
 
         /// In-place negation; `self` is overwritten with `neg`.
@@ -394,8 +485,11 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         /// Component-wise reciprocal (GLM `inverse(vec)`): `1/x` per lane,
         /// computed via a single SIMD division. Use on a `1/d` precomputed
-        /// vector, not on matrices (that is `mat.inverse()`).
+        /// vector, not on matrices (that is `mat.inverse()`). Float vectors
+        /// only.
         pub inline fn inverse(self: Self) Self {
+            if (comptime !scalar.isFloat(scalar_type))
+                @compileError("inverse is only defined for float vectors");
             return .{ .v = @as(storage_type, @splat(scalar.cast(scalar_type, 1))) / self.v };
         }
 
@@ -652,7 +746,10 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// Per-component smoothstep (GLM `smoothstep(e0, e1, self)`): 0 at
         /// `edge0`, 1 at `edge1` with a Hermite (2t³−3t²) ramp in between. Ideal
         /// for easing transitions; where t leaves [`edge0`, `edge1`] the result clamps.
+        /// Float vectors only.
         pub inline fn smoothstep(self: Self, edge0: anytype, edge1: anytype) Self {
+            if (comptime !scalar.isFloat(scalar_type))
+                @compileError("smoothstep is only defined for float vectors");
             return self.apply3(edge0, edge1, scalar.smoothstep);
         }
 
@@ -992,37 +1089,46 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// Dot product (GLM/GLSL `dot`): sum of component products. For unit
         /// vectors the result is the cosine of the angle between them;
         /// `n.dot(d)` with a plane normal answers which side of a plane a
-        /// direction is on (see `faceforward`).
+        /// direction is on (see `faceforward`). Integer vectors wrap on
+        /// overflow.
         pub inline fn dot(self: Self, right_hand_side: Self) scalar_type {
-            return @reduce(.Add, self.v * right_hand_side.v);
+            return reduceAddValues(mulValues(self.v, right_hand_side.v));
         }
 
-        /// Euclidean length `√(x·x)` (GLM `length`). Computed in the
-        /// vector's float type (int vectors promote to `float_type`, so
-        /// even `ivec2(3,4).length() == 5.0`). Use `distance` for the
-        /// length of a difference.
+        /// Euclidean length `√(x·x)` (GLM `length`). Integer vectors are
+        /// promoted to `float_type` before squaring, so even
+        /// `ivec2(3,4).length() == 5.0` without integer overflow. Use
+        /// `distance` for the length of a difference.
         pub inline fn length(self: Self) float_type {
-            const d = @reduce(.Add, self.v * self.v);
-            return scalar.sqrt(scalar.cast(float_type, d));
+            const values = self.floatValues();
+            return scalar.sqrt(@reduce(.Add, values * values));
         }
 
         /// Distance between two points (GLM `distance`): `(a - b).length()`.
-        /// For comparing distances prefer `lengthSquared`-style checks
-        /// (`a.sub(b).dot(a.sub(b))`) when the square root can be avoided.
+        /// Integer lanes are promoted to `float_type` before subtracting, so
+        /// unsigned vectors cannot underflow. For comparing distances prefer
+        /// `lengthSquared`-style checks (`a.sub(b).dot(a.sub(b))`) when the
+        /// square root can be avoided.
         pub inline fn distance(self: Self, right_hand_side: Self) float_type {
+            if (comptime scalar.isInt(scalar_type)) {
+                const a = self.floatValues();
+                const b = right_hand_side.floatValues();
+                const d = a - b;
+                return scalar.sqrt(@reduce(.Add, d * d));
+            }
             return self.sub(right_hand_side).length();
         }
 
         /// Cross product, 3D only (GLM `cross`): a vector perpendicular to
         /// both operands whose length equals the parallelogram area. Handed
         /// right-handed, matching GLM; aggregate into `mat4`-style rotation
-        /// bases with `normalize`.
+        /// bases with `normalize`. Integer vectors wrap on overflow.
         pub fn cross(self: Self, right_hand_side: Self) Self {
             if (comptime component_count != 3) @compileError("cross is only defined for 3-component vectors");
             return .{ .v = @Vector(3, scalar_type){
-                self.v[1] * right_hand_side.v[2] - self.v[2] * right_hand_side.v[1],
-                self.v[2] * right_hand_side.v[0] - self.v[0] * right_hand_side.v[2],
-                self.v[0] * right_hand_side.v[1] - self.v[1] * right_hand_side.v[0],
+                subScalars(mulScalars(self.v[1], right_hand_side.v[2]), mulScalars(self.v[2], right_hand_side.v[1])),
+                subScalars(mulScalars(self.v[2], right_hand_side.v[0]), mulScalars(self.v[0], right_hand_side.v[2])),
+                subScalars(mulScalars(self.v[0], right_hand_side.v[1]), mulScalars(self.v[1], right_hand_side.v[0])),
             } };
         }
 
@@ -1032,22 +1138,22 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         }
 
         /// Unit vector in the same direction (GLM `normalize`):
-        /// `v / |v|`. Zero vectors stay zero; returns a float vector even
-        /// for int inputs. Use on directions before `dot`/`cross` so that
-        /// angle computations behave like on unit spheres.
+        /// `v / |v|`. Returns a float vector even for int inputs; integer
+        /// lanes are promoted before squaring. Use on directions before
+        /// `dot`/`cross` so that angle computations behave like on unit
+        /// spheres.
         pub fn normalize(self: Self) Vec(component_count, float_type) {
-            const d = @reduce(.Add, self.v * self.v);
-            const is: float_type = scalar.inversesqrt(scalar.cast(float_type, d));
-            const c: @Vector(component_count, float_type) = if (scalar_type == float_type)
-                self.v
-            else
-                @floatCast(self.v);
-            return .{ .v = c * @as(@Vector(component_count, float_type), @splat(is)) };
+            const values = self.floatValues();
+            const d = @reduce(.Add, values * values);
+            const is: float_type = scalar.inversesqrt(d);
+            return .{ .v = values * @as(@Vector(component_count, float_type), @splat(is)) };
         }
 
         /// In-place renormalization to unit length; `self` is overwritten with
         /// `normalize`. Only valid when the vector's scalar type is floating-point.
         pub inline fn normalizeSelf(self: *Self) void {
+            if (comptime !scalar.isFloat(scalar_type))
+                @compileError("normalizeSelf is only valid for float vectors; use normalize");
             self.* = self.normalize();
         }
 
@@ -1899,14 +2005,16 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         /// Sum of all components (GLM `compAdd`, GLSL `compAdd`): a scalar.
         /// This is the same reduction `dot` applies to the component products.
+        /// Integer vectors wrap on overflow.
         pub inline fn compAdd(self: Self) scalar_type {
-            return @reduce(.Add, self.v);
+            return reduceAddValues(self.v);
         }
 
         /// Product of all components (GLM `compMul`): `x*y*z*w`. Zero in
-        /// any lane zeroes the result — check before dividing by it.
+        /// any lane zeroes the result — check before dividing by it. Integer
+        /// vectors wrap on overflow.
         pub inline fn compMul(self: Self) scalar_type {
-            return @reduce(.Mul, self.v);
+            return reduceMulValues(self.v);
         }
 
         /// Minimum of all components (GLM `compMin`). Useful to find the

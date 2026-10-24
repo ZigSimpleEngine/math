@@ -25,6 +25,15 @@ pub fn isSigned(comptime scalar_type: type) bool {
     return isInt(scalar_type) and @typeInfo(scalar_type).int.signedness == .signed;
 }
 
+/// Returns `true` if `scalar_type` is an *unsigned* integer type.
+pub fn isUnsigned(comptime scalar_type: type) bool {
+    return isInt(scalar_type) and @typeInfo(scalar_type).int.signedness == .unsigned;
+}
+
+fn IntType(comptime signedness: std.builtin.Signedness, comptime bits: comptime_int) type {
+    return @Int(signedness, bits);
+}
+
 /// Returns `true` if `scalar_type` can be passed to the arithmetic functions here:
 /// comptime literals, integers, floats and bools.
 pub fn isNumber(comptime scalar_type: type) bool {
@@ -52,18 +61,60 @@ pub fn rtType(comptime scalar_type: type) type {
     };
 }
 
-/// Convert `value` to `scalar_type` following C++ implicit-conversion rules: bool <-> int
-/// <-> float round-trips, floats narrow to integers by truncation, comptime
-/// values convert at compile time. Use `scalar.cast(scalar_type, value)` wherever the GLM
-/// reference relies on an implicit conversion of a literal or variable.
+/// C++/GLM integer conversion: both signed and unsigned targets receive the
+/// two's-complement value modulo 2^target_bits. Widening preserves the value
+/// (sign-extending signed sources, zero-extending unsigned ones); narrowing
+/// keeps the low bits; signedness changes reinterpret the same bits.
+fn castInt(comptime target_type: type, value: anytype) target_type {
+    const Source = @TypeOf(value);
+    const dst_bits = @bitSizeOf(target_type);
+
+    if (comptime Source == comptime_int) {
+        const UT = IntType(.unsigned, dst_bits);
+        const modulus = @as(comptime_int, 1) << dst_bits;
+        const wrapped: UT = @intCast(@mod(value, modulus));
+        return @bitCast(wrapped);
+    }
+
+    const src_bits = @bitSizeOf(Source);
+    const work_bits = @max(src_bits, dst_bits);
+    const UW = IntType(.unsigned, work_bits);
+    const extended: UW = if (comptime isSigned(Source))
+        @bitCast(@as(IntType(.signed, work_bits), @intCast(value)))
+    else
+        @intCast(value);
+
+    const UT = IntType(.unsigned, dst_bits);
+    const truncated: UT = if (dst_bits == work_bits) @intCast(extended) else @truncate(extended);
+    return @bitCast(truncated);
+}
+
+/// Convert `value` to `scalar_type` following C++ implicit-conversion rules:
+/// integers wrap/truncate modulo 2^target_bits (including signedness changes),
+/// floats narrow to integers by truncation, and bool <-> numeric round-trips
+/// (`true` is 1, any non-zero numeric value is `true`). Float-to-int
+/// conversions remain safety-checked for non-finite or out-of-range values.
+/// Use `scalar.cast(scalar_type, value)` wherever the GLM reference relies on
+/// an implicit conversion of a literal or variable.
 pub fn cast(comptime scalar_type: type, value: anytype) scalar_type {
     const U = @TypeOf(value);
     if (U == scalar_type) return value;
     return switch (@typeInfo(U)) {
-        .comptime_int, .comptime_float => if (scalar_type == bool) value != 0 else @as(scalar_type, value),
+        .comptime_int => switch (@typeInfo(scalar_type)) {
+            .bool => value != 0,
+            .int => castInt(scalar_type, value),
+            .float => @floatFromInt(value),
+            else => @compileError("cannot cast comptime_int to " ++ @typeName(scalar_type)),
+        },
+        .comptime_float => switch (@typeInfo(scalar_type)) {
+            .bool => value != 0,
+            .int => @intFromFloat(@trunc(value)),
+            .float => @as(scalar_type, value),
+            else => @compileError("cannot cast comptime_float to " ++ @typeName(scalar_type)),
+        },
         .int => switch (@typeInfo(scalar_type)) {
             .bool => value != 0,
-            .int => @intCast(value),
+            .int => castInt(scalar_type, value),
             .float => @floatFromInt(value),
             else => @compileError("cannot cast integer to " ++ @typeName(scalar_type)),
         },
@@ -76,6 +127,7 @@ pub fn cast(comptime scalar_type: type, value: anytype) scalar_type {
         .bool => switch (@typeInfo(scalar_type)) {
             .bool => value,
             .int => @intFromBool(value),
+            .float => @floatFromInt(@intFromBool(value)),
             else => @compileError("cannot cast bool to " ++ @typeName(scalar_type)),
         },
         else => @compileError("cannot cast " ++ @typeName(U) ++ " to " ++ @typeName(scalar_type)),
@@ -160,7 +212,7 @@ pub fn fract(value: anytype) @TypeOf(value) {
 /// For integers: truncated remainder, sign follows `dividend`.
 pub fn mod(dividend: anytype, divisor: anytype) @TypeOf(dividend, divisor) {
     if (comptime isFloat(@TypeOf(dividend))) return dividend - divisor * floor(dividend / divisor);
-    return dividend % divisor;
+    return @rem(dividend, divisor);
 }
 
 /// Smaller of `left_hand_side` and `right_hand_side`. NaN propagates (returns NaN) — use `fmin` when
@@ -403,7 +455,7 @@ pub fn bitCount(value: anytype) i32 {
 pub fn findLSB(value: anytype) i32 {
     const scalar_type = @TypeOf(value);
     if (value == 0) return -1;
-    const U = std.meta.Int(.unsigned, @typeInfo(scalar_type).int.bits);
+    const U = IntType(.unsigned, @typeInfo(scalar_type).int.bits);
     return @as(i32, @ctz(@as(U, @bitCast(value))));
 }
 
@@ -420,7 +472,7 @@ pub fn findMSB(value: anytype) i32 {
     inline while (shift < 64) : (shift <<= 1) {
         if (bits > shift) v |= v >> shift;
     }
-    const U = std.meta.Int(.unsigned, bits);
+    const U = IntType(.unsigned, bits);
     const zeros: i32 = @as(i32, @popCount(~@as(U, @bitCast(v))));
     return @as(i32, @intCast(bits - 1)) - zeros;
 }
@@ -430,7 +482,7 @@ pub fn findMSB(value: anytype) i32 {
 /// Use for decoding packed bitfields (flag groups, color channels).
 pub fn bitfieldExtract(value: anytype, offset: i32, bits: i32) @TypeOf(value) {
     const scalar_type = @TypeOf(value);
-    const U = std.meta.Int(.unsigned, @typeInfo(scalar_type).int.bits);
+    const U = IntType(.unsigned, @typeInfo(scalar_type).int.bits);
     const uv: U = @bitCast(value);
     const mask: U = (@as(U, 1) << @intCast(bits)) -% 1;
     const extracted = (uv >> @intCast(offset)) & mask;
@@ -442,7 +494,7 @@ pub fn bitfieldExtract(value: anytype, offset: i32, bits: i32) @TypeOf(value) {
 /// Use for packing several small fields into one integer.
 pub fn bitfieldInsert(base: anytype, insert: anytype, offset: i32, bits: i32) @TypeOf(base, insert) {
     const scalar_type = @TypeOf(base, insert);
-    const U = std.meta.Int(.unsigned, @typeInfo(scalar_type).int.bits);
+    const U = IntType(.unsigned, @typeInfo(scalar_type).int.bits);
     const ub: U = @bitCast(base);
     const ui: U = @bitCast(insert);
     const mask: U = (@as(U, 1) << @intCast(bits)) -% 1;
@@ -837,16 +889,17 @@ pub fn isPowerOfTwo(value: anytype) bool {
 }
 
 /// Truncated integer remainder (C++ `%` semantics: sign follows the
-/// dividend). Zig's `%` already behaves this way for ints; the function is
-/// a named alias used for clarity inside the round/multiple helpers.
+/// dividend). Uses `@rem`, which is how Zig spells `%` for integers; the
+/// function is a named alias used for clarity inside the round/multiple
+/// helpers.
 pub fn remInt(dividend: anytype, divisor: anytype) @TypeOf(dividend, divisor) {
-    return dividend % divisor;
+    return @rem(dividend, divisor);
 }
 
 /// True if `value` is divisible by `multiple` (not limited to powers of
 /// two, unlike `isPowerOfTwo`).
 pub fn isMultiple(value: anytype, multiple: anytype) bool {
-    return value % multiple == 0;
+    return @rem(value, multiple) == 0;
 }
 
 /// Smallest power of two `>= |value|`, preserving the sign:
