@@ -6,6 +6,12 @@
 //! (`roundEven`, `iround`), ULP comparison, and truncated integer division.
 //! Vec/Mat/Quat delegate per-component math here, and the functions are
 //! exposed for direct use in application code.
+//!
+//! Integer helpers cover bitwise operations, shifts, rotates, bitfields and
+//! power-of-two/multiple arithmetic. Shift and rotate counts wrap modulo the
+//! operand bit width. Most same-type transforms also have a pointer-based
+//! `...Self` form (`absSelf(&x)`, `bitAndSelf(&x, y)`) that stores the result
+//! back through `x`.
 
 const std = @import("std");
 
@@ -443,6 +449,156 @@ pub fn inversesqrt(value: anytype) @TypeOf(value) {
 
 // ---- bit / integer ----
 
+fn requireInt(comptime function_name: []const u8, comptime value_type: type) void {
+    if (comptime !isInt(value_type))
+        @compileError(function_name ++ " is only defined for integer types, got " ++ @typeName(value_type));
+}
+
+fn normalizedShiftCount(comptime value_type: type, shift_count: anytype) std.math.Log2Int(value_type) {
+    const count_type = @TypeOf(shift_count);
+    if (comptime count_type != comptime_int and !isInt(count_type))
+        @compileError("shift count must be an integer");
+
+    const bits: comptime_int = @bitSizeOf(value_type);
+    if (comptime bits == 0) @compileError("cannot shift a zero-bit integer");
+    if (comptime count_type == comptime_int) return @intCast(@mod(shift_count, bits));
+
+    const U = IntType(.unsigned, @bitSizeOf(count_type));
+    const unsigned_count: U = if (comptime isSigned(count_type))
+        @bitCast(@as(IntType(.signed, @bitSizeOf(count_type)), shift_count))
+    else
+        @intCast(shift_count);
+
+    if (comptime bits > std.math.maxInt(U)) return @intCast(unsigned_count);
+    return @intCast(@mod(unsigned_count, bits));
+}
+
+/// Bitwise AND. Both operands must be integers; the result uses their common
+/// type. Use to test or combine flag masks.
+pub fn bitAnd(left_hand_side: anytype, right_hand_side: anytype) @TypeOf(left_hand_side, right_hand_side) {
+    const scalar_type = @TypeOf(left_hand_side, right_hand_side);
+    requireInt("bitAnd", scalar_type);
+    return @as(scalar_type, left_hand_side) & @as(scalar_type, right_hand_side);
+}
+
+/// In-place `bitAnd`: stores `bitAnd(value.*, right_hand_side)` back into `value`.
+pub fn bitAndSelf(value: anytype, right_hand_side: anytype) void {
+    value.* = bitAnd(value.*, right_hand_side);
+}
+
+/// Bitwise OR. Both operands must be integers; use to set flag bits.
+pub fn bitOr(left_hand_side: anytype, right_hand_side: anytype) @TypeOf(left_hand_side, right_hand_side) {
+    const scalar_type = @TypeOf(left_hand_side, right_hand_side);
+    requireInt("bitOr", scalar_type);
+    return @as(scalar_type, left_hand_side) | @as(scalar_type, right_hand_side);
+}
+
+/// In-place `bitOr`: stores `bitOr(value.*, right_hand_side)` back into `value`.
+pub fn bitOrSelf(value: anytype, right_hand_side: anytype) void {
+    value.* = bitOr(value.*, right_hand_side);
+}
+
+/// Bitwise XOR. Both operands must be integers; use to toggle flag bits.
+pub fn bitXor(left_hand_side: anytype, right_hand_side: anytype) @TypeOf(left_hand_side, right_hand_side) {
+    const scalar_type = @TypeOf(left_hand_side, right_hand_side);
+    requireInt("bitXor", scalar_type);
+    return @as(scalar_type, left_hand_side) ^ @as(scalar_type, right_hand_side);
+}
+
+/// In-place `bitXor`: stores `bitXor(value.*, right_hand_side)` back into `value`.
+pub fn bitXorSelf(value: anytype, right_hand_side: anytype) void {
+    value.* = bitXor(value.*, right_hand_side);
+}
+
+/// Bitwise NOT (one's complement). Use to invert a complete flag mask.
+pub fn bitNot(value: anytype) @TypeOf(value) {
+    requireInt("bitNot", @TypeOf(value));
+    return ~value;
+}
+
+/// In-place `bitNot`: stores `bitNot(value.*)` back into `value`.
+pub fn bitNotSelf(value: anytype) void {
+    value.* = bitNot(value.*);
+}
+
+/// Left shift by `shift_count` bits. The shift count is taken modulo the
+/// integer's bit width, so shifts greater than or equal to the width wrap
+/// instead of overflowing; bits shifted out are discarded.
+pub fn shiftLeft(value: anytype, shift_count: anytype) @TypeOf(value) {
+    const scalar_type = @TypeOf(value);
+    requireInt("shiftLeft", scalar_type);
+    const U = IntType(.unsigned, @bitSizeOf(scalar_type));
+    const unsigned_value: U = @bitCast(value);
+    return @bitCast(unsigned_value << normalizedShiftCount(scalar_type, shift_count));
+}
+
+/// In-place `shiftLeft`: stores `shiftLeft(value.*, shift_count)` back into `value`.
+pub fn shiftLeftSelf(value: anytype, shift_count: anytype) void {
+    value.* = shiftLeft(value.*, shift_count);
+}
+
+/// Arithmetic right shift by `shift_count` bits: signed values keep their sign
+/// (the vacated high bits are filled with the sign bit); unsigned values are
+/// zero-filled. The count wraps modulo the bit width.
+pub fn shiftRightArithmetic(value: anytype, shift_count: anytype) @TypeOf(value) {
+    const scalar_type = @TypeOf(value);
+    requireInt("shiftRightArithmetic", scalar_type);
+    if (comptime isSigned(scalar_type))
+        return value >> normalizedShiftCount(scalar_type, shift_count);
+    return shiftRightLogical(value, shift_count);
+}
+
+/// In-place `shiftRightArithmetic`: stores the result back into `value`.
+pub fn shiftRightArithmeticSelf(value: anytype, shift_count: anytype) void {
+    value.* = shiftRightArithmetic(value.*, shift_count);
+}
+
+/// Logical right shift by `shift_count` bits: vacated high bits are always
+/// zero-filled, including for signed values. The count wraps modulo the bit
+/// width.
+pub fn shiftRightLogical(value: anytype, shift_count: anytype) @TypeOf(value) {
+    const scalar_type = @TypeOf(value);
+    requireInt("shiftRightLogical", scalar_type);
+    const U = IntType(.unsigned, @bitSizeOf(scalar_type));
+    const unsigned_value: U = @bitCast(value);
+    return @bitCast(unsigned_value >> normalizedShiftCount(scalar_type, shift_count));
+}
+
+/// In-place `shiftRightLogical`: stores the result back into `value`.
+pub fn shiftRightLogicalSelf(value: anytype, shift_count: anytype) void {
+    value.* = shiftRightLogical(value.*, shift_count);
+}
+
+/// Rotate bits left by `shift_count`; bits leaving the top re-enter at the
+/// bottom. The count wraps modulo the bit width.
+pub fn bitfieldRotateLeft(value: anytype, shift_count: anytype) @TypeOf(value) {
+    const scalar_type = @TypeOf(value);
+    requireInt("bitfieldRotateLeft", scalar_type);
+    const U = IntType(.unsigned, @bitSizeOf(scalar_type));
+    const unsigned_value: U = @bitCast(value);
+    return @bitCast(std.math.rotl(U, unsigned_value, normalizedShiftCount(scalar_type, shift_count)));
+}
+
+/// In-place `bitfieldRotateLeft`: stores the result back into `value`.
+pub fn bitfieldRotateLeftSelf(value: anytype, shift_count: anytype) void {
+    value.* = bitfieldRotateLeft(value.*, shift_count);
+}
+
+/// Rotate bits right by `shift_count`; bits leaving the bottom re-enter at the
+/// top. The count wraps modulo the bit width.
+pub fn bitfieldRotateRight(value: anytype, shift_count: anytype) @TypeOf(value) {
+    const scalar_type = @TypeOf(value);
+    requireInt("bitfieldRotateRight", scalar_type);
+    const U = IntType(.unsigned, @bitSizeOf(scalar_type));
+    const unsigned_value: U = @bitCast(value);
+    return @bitCast(std.math.rotr(U, unsigned_value, normalizedShiftCount(scalar_type, shift_count)));
+}
+
+/// In-place `bitfieldRotateRight`: stores the result back into `value`.
+pub fn bitfieldRotateRightSelf(value: anytype, shift_count: anytype) void {
+    value.* = bitfieldRotateRight(value.*, shift_count);
+}
+
 /// Population count: number of 1 bits in `value`. Use for Hamming distance,
 /// bitboard tricks or validating sparse flag masks.
 pub fn bitCount(value: anytype) i32 {
@@ -480,26 +636,30 @@ pub fn findMSB(value: anytype) i32 {
 /// Extract `bits` bits starting at `offset` (bit 0 = LSB), as GLSL
 /// `bitfieldExtract`. Example: `bitfieldExtract(0b11011010, 3, 4) == 0b1011`.
 /// Use for decoding packed bitfields (flag groups, color channels).
-pub fn bitfieldExtract(value: anytype, offset: i32, bits: i32) @TypeOf(value) {
+pub fn bitfieldExtract(value: anytype, offset: anytype, bits: anytype) @TypeOf(value) {
     const scalar_type = @TypeOf(value);
     const U = IntType(.unsigned, @typeInfo(scalar_type).int.bits);
     const uv: U = @bitCast(value);
-    const mask: U = (@as(U, 1) << @intCast(bits)) -% 1;
-    const extracted = (uv >> @intCast(offset)) & mask;
+    const lane_offset: i32 = @intCast(offset);
+    const lane_bits: i32 = @intCast(bits);
+    const mask: U = (@as(U, 1) << @intCast(lane_bits)) -% 1;
+    const extracted = (uv >> @intCast(lane_offset)) & mask;
     return @bitCast(extracted);
 }
 
 /// Replace `bits` bits of `base` (starting at `offset`) with the low `bits`
 /// bits of `insert`; all other bits of `base` are kept.
 /// Use for packing several small fields into one integer.
-pub fn bitfieldInsert(base: anytype, insert: anytype, offset: i32, bits: i32) @TypeOf(base, insert) {
+pub fn bitfieldInsert(base: anytype, insert: anytype, offset: anytype, bits: anytype) @TypeOf(base, insert) {
     const scalar_type = @TypeOf(base, insert);
     const U = IntType(.unsigned, @typeInfo(scalar_type).int.bits);
-    const ub: U = @bitCast(base);
-    const ui: U = @bitCast(insert);
-    const mask: U = (@as(U, 1) << @intCast(bits)) -% 1;
-    const shifted_mask = mask << @intCast(offset);
-    return @bitCast((ub & ~shifted_mask) | ((ui << @intCast(offset)) & shifted_mask));
+    const ub: U = @bitCast(@as(scalar_type, base));
+    const ui: U = @bitCast(@as(scalar_type, insert));
+    const lane_offset: i32 = @intCast(offset);
+    const lane_bits: i32 = @intCast(bits);
+    const mask: U = (@as(U, 1) << @intCast(lane_bits)) -% 1;
+    const shifted_mask = mask << @intCast(lane_offset);
+    return @bitCast((ub & ~shifted_mask) | ((ui << @intCast(lane_offset)) & shifted_mask));
 }
 
 /// Reverse the order of the bits of `value` (LSB becomes MSB). Use for
@@ -807,7 +967,7 @@ pub fn notEqualULP(left_hand_side: anytype, right_hand_side: anytype, max_ulps: 
 /// Use to iterate a float lattice or to compute "1 ULP above" a value.
 pub fn nextFloat(value: anytype) @TypeOf(value) {
     const scalar_type = @TypeOf(value);
-    return std.math.nextAfter(value, std.math.inf(scalar_type));
+    return std.math.nextAfter(scalar_type, value, std.math.inf(scalar_type));
 }
 
 /// Apply `nextFloat` `ulps` times — moves `ulps` steps up the float
@@ -823,7 +983,7 @@ pub fn nextFloatN(value: anytype, ulps: i32) @TypeOf(value) {
 /// Use to compute "1 ULP below" a value.
 pub fn prevFloat(value: anytype) @TypeOf(value) {
     const scalar_type = @TypeOf(value);
-    return std.math.nextAfter(value, -std.math.inf(scalar_type));
+    return std.math.nextAfter(scalar_type, value, -std.math.inf(scalar_type));
 }
 
 /// Apply `prevFloat` `ulps` times — moves `ulps` steps down the float
@@ -1049,4 +1209,429 @@ pub fn findNSB(value: anytype, significant_bit_count: i32) i32 {
         if (bit_step == 0) break;
     }
     return bit_pos;
+}
+
+// ---- in-place variants ----
+
+/// In-place `abs`: stores `abs(value.*)` back into `value`.
+pub fn absSelf(value: anytype) void {
+    value.* = abs(value.*);
+}
+
+/// In-place `sign`: stores `sign(value.*)` back into `value`.
+pub fn signSelf(value: anytype) void {
+    value.* = sign(value.*);
+}
+
+/// In-place `floor`: stores `floor(value.*)` back into `value`.
+pub fn floorSelf(value: anytype) void {
+    value.* = floor(value.*);
+}
+
+/// In-place `ceil`: stores `ceil(value.*)` back into `value`.
+pub fn ceilSelf(value: anytype) void {
+    value.* = ceil(value.*);
+}
+
+/// In-place `round`: stores `round(value.*)` back into `value`.
+pub fn roundSelf(value: anytype) void {
+    value.* = round(value.*);
+}
+
+/// In-place `roundEven`: stores `roundEven(value.*)` back into `value`.
+pub fn roundEvenSelf(value: anytype) void {
+    value.* = roundEven(value.*);
+}
+
+/// In-place `trunc`: stores `trunc(value.*)` back into `value`.
+pub fn truncSelf(value: anytype) void {
+    value.* = trunc(value.*);
+}
+
+/// In-place `fract`: stores `fract(value.*)` back into `value`.
+pub fn fractSelf(value: anytype) void {
+    value.* = fract(value.*);
+}
+
+/// In-place `mod`: stores `mod(value.*, divisor)` back into `value`.
+pub fn modSelf(value: anytype, divisor: anytype) void {
+    value.* = mod(value.*, divisor);
+}
+
+/// In-place `min`: stores `min(value.*, right_hand_side)` back into `value`.
+pub fn minSelf(value: anytype, right_hand_side: anytype) void {
+    value.* = min(value.*, right_hand_side);
+}
+
+/// In-place `max`: stores `max(value.*, right_hand_side)` back into `value`.
+pub fn maxSelf(value: anytype, right_hand_side: anytype) void {
+    value.* = max(value.*, right_hand_side);
+}
+
+/// In-place `clamp`: stores `clamp(value.*, min_val, max_val)` back into `value`.
+pub fn clampSelf(value: anytype, min_val: anytype, max_val: anytype) void {
+    value.* = clamp(value.*, min_val, max_val);
+}
+
+/// In-place `mix`: stores `mix(value.*, to, factor)` back into `value`.
+pub fn mixSelf(value: anytype, to: anytype, factor: anytype) void {
+    value.* = mix(value.*, to, factor);
+}
+
+/// In-place `step`: stores `step(edge, value.*)` back into `value`.
+pub fn stepSelf(value: anytype, edge: anytype) void {
+    value.* = step(edge, value.*);
+}
+
+/// In-place `smoothstep`: stores `smoothstep(edge0, edge1, value.*)` back into `value`.
+pub fn smoothstepSelf(value: anytype, edge0: anytype, edge1: anytype) void {
+    value.* = smoothstep(edge0, edge1, value.*);
+}
+
+/// In-place `fma`: stores `fma(value.*, right_hand_side, addend)` back into `value`.
+pub fn fmaSelf(value: anytype, right_hand_side: anytype, addend: anytype) void {
+    value.* = fma(value.*, right_hand_side, addend);
+}
+
+/// In-place `radians`: stores `radians(value.*)` back into `value`.
+pub fn radiansSelf(value: anytype) void {
+    value.* = radians(value.*);
+}
+
+/// In-place `degrees`: stores `degrees(value.*)` back into `value`.
+pub fn degreesSelf(value: anytype) void {
+    value.* = degrees(value.*);
+}
+
+/// In-place `sin`: stores `sin(value.*)` back into `value`.
+pub fn sinSelf(value: anytype) void {
+    value.* = sin(value.*);
+}
+
+/// In-place `cos`: stores `cos(value.*)` back into `value`.
+pub fn cosSelf(value: anytype) void {
+    value.* = cos(value.*);
+}
+
+/// In-place `tan`: stores `tan(value.*)` back into `value`.
+pub fn tanSelf(value: anytype) void {
+    value.* = tan(value.*);
+}
+
+/// In-place `asin`: stores `asin(value.*)` back into `value`.
+pub fn asinSelf(value: anytype) void {
+    value.* = asin(value.*);
+}
+
+/// In-place `acos`: stores `acos(value.*)` back into `value`.
+pub fn acosSelf(value: anytype) void {
+    value.* = acos(value.*);
+}
+
+/// In-place `atan`: stores `atan(value.*)` back into `value`.
+pub fn atanSelf(value: anytype) void {
+    value.* = atan(value.*);
+}
+
+/// In-place `atan2`: stores `atan2(value.*, x)` back into `value`.
+pub fn atan2Self(value: anytype, x: anytype) void {
+    value.* = atan2(value.*, x);
+}
+
+/// In-place `sinh`: stores `sinh(value.*)` back into `value`.
+pub fn sinhSelf(value: anytype) void {
+    value.* = sinh(value.*);
+}
+
+/// In-place `cosh`: stores `cosh(value.*)` back into `value`.
+pub fn coshSelf(value: anytype) void {
+    value.* = cosh(value.*);
+}
+
+/// In-place `tanh`: stores `tanh(value.*)` back into `value`.
+pub fn tanhSelf(value: anytype) void {
+    value.* = tanh(value.*);
+}
+
+/// In-place `asinh`: stores `asinh(value.*)` back into `value`.
+pub fn asinhSelf(value: anytype) void {
+    value.* = asinh(value.*);
+}
+
+/// In-place `acosh`: stores `acosh(value.*)` back into `value`.
+pub fn acoshSelf(value: anytype) void {
+    value.* = acosh(value.*);
+}
+
+/// In-place `atanh`: stores `atanh(value.*)` back into `value`.
+pub fn atanhSelf(value: anytype) void {
+    value.* = atanh(value.*);
+}
+
+/// In-place `pow`: stores `pow(value.*, exponent)` back into `value`.
+pub fn powSelf(value: anytype, exponent: anytype) void {
+    value.* = pow(value.*, exponent);
+}
+
+/// In-place `exp`: stores `exp(value.*)` back into `value`.
+pub fn expSelf(value: anytype) void {
+    value.* = exp(value.*);
+}
+
+/// In-place `exp2`: stores `exp2(value.*)` back into `value`.
+pub fn exp2Self(value: anytype) void {
+    value.* = exp2(value.*);
+}
+
+/// In-place `log`: stores `log(value.*)` back into `value`.
+pub fn logSelf(value: anytype) void {
+    value.* = log(value.*);
+}
+
+/// In-place `log2`: stores `log2(value.*)` back into `value`.
+pub fn log2Self(value: anytype) void {
+    value.* = log2(value.*);
+}
+
+/// In-place `sqrt`: stores `sqrt(value.*)` back into `value`.
+pub fn sqrtSelf(value: anytype) void {
+    value.* = sqrt(value.*);
+}
+
+/// In-place `inversesqrt`: stores `inversesqrt(value.*)` back into `value`.
+pub fn inversesqrtSelf(value: anytype) void {
+    value.* = inversesqrt(value.*);
+}
+
+/// In-place `ldexp`: stores `ldexp(value.*, exponent)` back into `value`.
+/// Only valid when the working float type matches `value`'s type.
+pub fn ldexpSelf(value: anytype, exponent: i32) void {
+    if (comptime floatType(@TypeOf(value.*)) != @TypeOf(value.*))
+        @compileError("ldexpSelf requires f16, f32, or f64");
+    value.* = ldexp(value.*, exponent);
+}
+
+/// In-place `bitfieldExtract`: stores the extracted field back into `value`.
+pub fn bitfieldExtractSelf(value: anytype, offset: anytype, bits: anytype) void {
+    value.* = bitfieldExtract(value.*, offset, bits);
+}
+
+/// In-place `bitfieldInsert`: stores the inserted field back into `value`.
+pub fn bitfieldInsertSelf(value: anytype, insert: anytype, offset: anytype, bits: anytype) void {
+    value.* = bitfieldInsert(value.*, insert, offset, bits);
+}
+
+/// In-place `bitfieldReverse`: stores the reversed bits back into `value`.
+pub fn bitfieldReverseSelf(value: anytype) void {
+    value.* = bitfieldReverse(value.*);
+}
+
+/// In-place `min3`: stores `min3(value.*, value2, value3)` back into `value`.
+pub fn min3Self(value: anytype, value2: anytype, value3: anytype) void {
+    value.* = min3(value.*, value2, value3);
+}
+
+/// In-place `min4`: stores `min4(value.*, value2, value3, value4)` back into `value`.
+pub fn min4Self(value: anytype, value2: anytype, value3: anytype, value4: anytype) void {
+    value.* = min4(value.*, value2, value3, value4);
+}
+
+/// In-place `max3`: stores `max3(value.*, value2, value3)` back into `value`.
+pub fn max3Self(value: anytype, value2: anytype, value3: anytype) void {
+    value.* = max3(value.*, value2, value3);
+}
+
+/// In-place `max4`: stores `max4(value.*, value2, value3, value4)` back into `value`.
+pub fn max4Self(value: anytype, value2: anytype, value3: anytype, value4: anytype) void {
+    value.* = max4(value.*, value2, value3, value4);
+}
+
+/// In-place `fmin`: stores `fmin(value.*, right_hand_side)` back into `value`.
+pub fn fminSelf(value: anytype, right_hand_side: anytype) void {
+    value.* = fmin(value.*, right_hand_side);
+}
+
+/// In-place `fmin3`: stores `fmin3(value.*, value2, value3)` back into `value`.
+pub fn fmin3Self(value: anytype, value2: anytype, value3: anytype) void {
+    value.* = fmin3(value.*, value2, value3);
+}
+
+/// In-place `fmin4`: stores `fmin4(value.*, value2, value3, value4)` back into `value`.
+pub fn fmin4Self(value: anytype, value2: anytype, value3: anytype, value4: anytype) void {
+    value.* = fmin4(value.*, value2, value3, value4);
+}
+
+/// In-place `fmax`: stores `fmax(value.*, right_hand_side)` back into `value`.
+pub fn fmaxSelf(value: anytype, right_hand_side: anytype) void {
+    value.* = fmax(value.*, right_hand_side);
+}
+
+/// In-place `fmax3`: stores `fmax3(value.*, value2, value3)` back into `value`.
+pub fn fmax3Self(value: anytype, value2: anytype, value3: anytype) void {
+    value.* = fmax3(value.*, value2, value3);
+}
+
+/// In-place `fmax4`: stores `fmax4(value.*, value2, value3, value4)` back into `value`.
+pub fn fmax4Self(value: anytype, value2: anytype, value3: anytype, value4: anytype) void {
+    value.* = fmax4(value.*, value2, value3, value4);
+}
+
+/// In-place `fclamp`: stores `fclamp(value.*, min_val, max_val)` back into `value`.
+pub fn fclampSelf(value: anytype, min_val: anytype, max_val: anytype) void {
+    value.* = fclamp(value.*, min_val, max_val);
+}
+
+/// In-place `clamp01`: stores `clamp01(value.*)` back into `value`.
+pub fn clamp01Self(value: anytype) void {
+    value.* = clamp01(value.*);
+}
+
+/// In-place `repeat`: stores `repeat(value.*)` back into `value`.
+pub fn repeatSelf(value: anytype) void {
+    value.* = repeat(value.*);
+}
+
+/// In-place `mirrorClamp`: stores `mirrorClamp(value.*)` back into `value`.
+pub fn mirrorClampSelf(value: anytype) void {
+    value.* = mirrorClamp(value.*);
+}
+
+/// In-place `mirrorRepeat`: stores `mirrorRepeat(value.*)` back into `value`.
+pub fn mirrorRepeatSelf(value: anytype) void {
+    value.* = mirrorRepeat(value.*);
+}
+
+/// In-place `sec`: stores `sec(value.*)` back into `value`.
+pub fn secSelf(value: anytype) void {
+    value.* = sec(value.*);
+}
+
+/// In-place `csc`: stores `csc(value.*)` back into `value`.
+pub fn cscSelf(value: anytype) void {
+    value.* = csc(value.*);
+}
+
+/// In-place `cot`: stores `cot(value.*)` back into `value`.
+pub fn cotSelf(value: anytype) void {
+    value.* = cot(value.*);
+}
+
+/// In-place `asec`: stores `asec(value.*)` back into `value`.
+pub fn asecSelf(value: anytype) void {
+    value.* = asec(value.*);
+}
+
+/// In-place `acsc`: stores `acsc(value.*)` back into `value`.
+pub fn acscSelf(value: anytype) void {
+    value.* = acsc(value.*);
+}
+
+/// In-place `acot`: stores `acot(value.*)` back into `value`.
+pub fn acotSelf(value: anytype) void {
+    value.* = acot(value.*);
+}
+
+/// In-place `sech`: stores `sech(value.*)` back into `value`.
+pub fn sechSelf(value: anytype) void {
+    value.* = sech(value.*);
+}
+
+/// In-place `csch`: stores `csch(value.*)` back into `value`.
+pub fn cschSelf(value: anytype) void {
+    value.* = csch(value.*);
+}
+
+/// In-place `coth`: stores `coth(value.*)` back into `value`.
+pub fn cothSelf(value: anytype) void {
+    value.* = coth(value.*);
+}
+
+/// In-place `asech`: stores `asech(value.*)` back into `value`.
+pub fn asechSelf(value: anytype) void {
+    value.* = asech(value.*);
+}
+
+/// In-place `acsch`: stores `acsch(value.*)` back into `value`.
+pub fn acschSelf(value: anytype) void {
+    value.* = acsch(value.*);
+}
+
+/// In-place `acoth`: stores `acoth(value.*)` back into `value`.
+pub fn acothSelf(value: anytype) void {
+    value.* = acoth(value.*);
+}
+
+/// In-place `nextFloat`: stores `nextFloat(value.*)` back into `value`.
+pub fn nextFloatSelf(value: anytype) void {
+    value.* = nextFloat(value.*);
+}
+
+/// In-place `nextFloatN`: stores `nextFloatN(value.*, ulps)` back into `value`.
+pub fn nextFloatNSelf(value: anytype, ulps: i32) void {
+    value.* = nextFloatN(value.*, ulps);
+}
+
+/// In-place `prevFloat`: stores `prevFloat(value.*)` back into `value`.
+pub fn prevFloatSelf(value: anytype) void {
+    value.* = prevFloat(value.*);
+}
+
+/// In-place `prevFloatN`: stores `prevFloatN(value.*, ulps)` back into `value`.
+pub fn prevFloatNSelf(value: anytype, ulps: i32) void {
+    value.* = prevFloatN(value.*, ulps);
+}
+
+/// In-place `ceilPowerOfTwo`: stores `ceilPowerOfTwo(value.*)` back into `value`.
+pub fn ceilPowerOfTwoSelf(value: anytype) void {
+    value.* = ceilPowerOfTwo(value.*);
+}
+
+/// In-place `floorPowerOfTwo`: stores `floorPowerOfTwo(value.*)` back into `value`.
+pub fn floorPowerOfTwoSelf(value: anytype) void {
+    value.* = floorPowerOfTwo(value.*);
+}
+
+/// In-place `roundPowerOfTwo`: stores `roundPowerOfTwo(value.*)` back into `value`.
+pub fn roundPowerOfTwoSelf(value: anytype) void {
+    value.* = roundPowerOfTwo(value.*);
+}
+
+/// In-place `nextPowerOfTwo`: stores `nextPowerOfTwo(value.*)` back into `value`.
+pub fn nextPowerOfTwoSelf(value: anytype) void {
+    value.* = nextPowerOfTwo(value.*);
+}
+
+/// In-place `prevPowerOfTwo`: stores `prevPowerOfTwo(value.*)` back into `value`.
+pub fn prevPowerOfTwoSelf(value: anytype) void {
+    value.* = prevPowerOfTwo(value.*);
+}
+
+/// In-place `nextMultiple`: stores `nextMultiple(value.*, multiple)` back into `value`.
+pub fn nextMultipleSelf(value: anytype, multiple: anytype) void {
+    value.* = nextMultiple(value.*, multiple);
+}
+
+/// In-place `prevMultiple`: stores `prevMultiple(value.*, multiple)` back into `value`.
+pub fn prevMultipleSelf(value: anytype, multiple: anytype) void {
+    value.* = prevMultiple(value.*, multiple);
+}
+
+/// In-place `ceilMultiple`: stores `ceilMultiple(value.*, multiple)` back into `value`.
+pub fn ceilMultipleSelf(value: anytype, multiple: anytype) void {
+    value.* = ceilMultiple(value.*, multiple);
+}
+
+/// In-place `floorMultiple`: stores `floorMultiple(value.*, multiple)` back into `value`.
+pub fn floorMultipleSelf(value: anytype, multiple: anytype) void {
+    value.* = floorMultiple(value.*, multiple);
+}
+
+/// In-place `roundMultiple`: stores `roundMultiple(value.*, multiple)` back into `value`.
+pub fn roundMultipleSelf(value: anytype, multiple: anytype) void {
+    value.* = roundMultiple(value.*, multiple);
+}
+
+/// In-place `remInt`: stores `remInt(value.*, divisor)` back into `value`.
+pub fn remIntSelf(value: anytype, divisor: anytype) void {
+    value.* = remInt(value.*, divisor);
 }

@@ -96,6 +96,318 @@ test "scalar cast conversions" {
     try std.testing.expect(scalar.cast(bool, @as(f32, 0.5)));
 }
 
+test "scalar bitwise and shifts" {
+    try std.testing.expectEqual(@as(u8, 0b0000_1010), scalar.bitAnd(@as(u8, 0b1100_1010), 0b0000_1111));
+    try std.testing.expectEqual(@as(u8, 0b1100_1111), scalar.bitOr(@as(u8, 0b1100_1010), 0b0000_1111));
+    try std.testing.expectEqual(@as(u8, 0b1100_0101), scalar.bitXor(@as(u8, 0b1100_1010), 0b0000_1111));
+    try std.testing.expectEqual(@as(u8, 0b0011_0101), scalar.bitNot(@as(u8, 0b1100_1010)));
+
+    var value: u8 = 0b1100_1010;
+    scalar.bitAndSelf(&value, 0b0000_1111);
+    try std.testing.expectEqual(@as(u8, 0b0000_1010), value);
+    scalar.bitOrSelf(&value, 0b0101_0000);
+    try std.testing.expectEqual(@as(u8, 0b0101_1010), value);
+    scalar.bitXorSelf(&value, 0b1111_1111);
+    try std.testing.expectEqual(@as(u8, 0b1010_0101), value);
+    scalar.bitNotSelf(&value);
+    try std.testing.expectEqual(@as(u8, 0b0101_1010), value);
+
+    try std.testing.expectEqual(@as(u8, 0b0000_0010), scalar.shiftLeft(@as(u8, 0b1000_0001), 1));
+    try std.testing.expectEqual(@as(u8, 0b1000_0001), scalar.shiftLeft(@as(u8, 0b1000_0001), 8));
+    try std.testing.expectEqual(@as(u8, 0b0000_0010), scalar.shiftLeft(@as(u8, 0b1000_0001), 9));
+    try std.testing.expectEqual(@as(u8, 0b1000_0000), scalar.shiftLeft(@as(u8, 1), -1));
+    try std.testing.expectEqual(@as(i8, -4), scalar.shiftRightArithmetic(@as(i8, -8), 1));
+    try std.testing.expectEqual(@as(i8, -8), scalar.shiftRightArithmetic(@as(i8, -8), 8));
+    try std.testing.expectEqual(@as(i8, 124), scalar.shiftRightLogical(@as(i8, -8), 1));
+    try std.testing.expectEqual(@as(i8, -8), scalar.shiftRightLogical(@as(i8, -8), 8));
+    try std.testing.expectEqual(@as(u8, 0x40), scalar.shiftRightLogical(@as(u8, 0x81), 1));
+
+    try std.testing.expectEqual(@as(u8, 0x81), scalar.bitfieldRotateLeft(@as(u8, 0x81), 0));
+    try std.testing.expectEqual(@as(u8, 0x03), scalar.bitfieldRotateLeft(@as(u8, 0x81), 1));
+    try std.testing.expectEqual(@as(u8, 0x03), scalar.bitfieldRotateLeft(@as(u8, 0x81), 9));
+    try std.testing.expectEqual(@as(u8, 0xC0), scalar.bitfieldRotateRight(@as(u8, 0x81), 1));
+    try std.testing.expectEqual(@as(i8, 3), scalar.bitfieldRotateLeft(@as(i8, -127), 1));
+
+    value = 0b1000_0001;
+    scalar.shiftLeftSelf(&value, 1);
+    try std.testing.expectEqual(@as(u8, 0b0000_0010), value);
+    scalar.shiftRightArithmeticSelf(&value, 1);
+    try std.testing.expectEqual(@as(u8, 0b0000_0001), value);
+    scalar.shiftRightLogicalSelf(&value, 1);
+    try std.testing.expectEqual(@as(u8, 0), value);
+
+    value = 0x81;
+    scalar.bitfieldRotateLeftSelf(&value, 1);
+    try std.testing.expectEqual(@as(u8, 0x03), value);
+    scalar.bitfieldRotateRightSelf(&value, 1);
+    try std.testing.expectEqual(@as(u8, 0x81), value);
+}
+
+test "scalar in-place variants" {
+    var value: f32 = -2.5;
+    scalar.absSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), value, 1e-6);
+    value = -2.5;
+    scalar.signSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, -1), value, 1e-6);
+    value = 2.7;
+    scalar.floorSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), value, 1e-6);
+    value = 2.1;
+    scalar.ceilSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 2.5;
+    scalar.roundSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 2.5;
+    scalar.roundEvenSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), value, 1e-6);
+    value = -2.7;
+    scalar.truncSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, -2), value, 1e-6);
+    value = 2.25;
+    scalar.fractSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), value, 1e-6);
+
+    value = 5.5;
+    scalar.modSelf(&value, 2);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), value, 1e-6);
+    value = 5;
+    scalar.minSelf(&value, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 5;
+    scalar.maxSelf(&value, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), value, 1e-6);
+    value = 5;
+    scalar.clampSelf(&value, 0, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 1;
+    scalar.mixSelf(&value, 3, 0.5);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), value, 1e-6);
+    value = 0.5;
+    scalar.stepSelf(&value, 1);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 0.5;
+    scalar.smoothstepSelf(&value, 0, 1);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), value, 1e-6);
+    value = 2;
+    scalar.fmaSelf(&value, 3, 1);
+    try std.testing.expectApproxEqAbs(@as(f32, 7), value, 1e-6);
+
+    value = 180;
+    scalar.radiansSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, std.math.pi), value, 1e-6);
+    value = std.math.pi;
+    scalar.degreesSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 180), value, 1e-6);
+    value = 0;
+    scalar.sinSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 0;
+    scalar.cosSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = 0;
+    scalar.tanSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 1;
+    scalar.asinSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, std.math.pi) / 2, value, 1e-6);
+    value = 1;
+    scalar.acosSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 1;
+    scalar.atanSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, std.math.pi) / 4, value, 1e-6);
+    value = 1;
+    scalar.atan2Self(&value, 1);
+    try std.testing.expectApproxEqAbs(@as(f32, std.math.pi) / 4, value, 1e-6);
+
+    value = 0;
+    scalar.sinhSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 0;
+    scalar.coshSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = 0;
+    scalar.tanhSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 0;
+    scalar.asinhSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 1;
+    scalar.acoshSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 0;
+    scalar.atanhSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+
+    value = 2;
+    scalar.powSelf(&value, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 8), value, 1e-6);
+    value = 0;
+    scalar.expSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = 3;
+    scalar.exp2Self(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 8), value, 1e-6);
+    value = 1;
+    scalar.logSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 8;
+    scalar.log2Self(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 9;
+    scalar.sqrtSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 4;
+    scalar.inversesqrtSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), value, 1e-6);
+    value = 1.5;
+    scalar.ldexpSelf(&value, 2);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), value, 1e-6);
+
+    var bits: u8 = 0xD6;
+    scalar.bitfieldExtractSelf(&bits, 3, 4);
+    try std.testing.expectEqual(@as(u8, 10), bits);
+    bits = 0;
+    scalar.bitfieldInsertSelf(&bits, 0b1111, 2, 4);
+    try std.testing.expectEqual(@as(u8, 60), bits);
+    bits = 0xCA;
+    scalar.bitfieldReverseSelf(&bits);
+    try std.testing.expectEqual(@as(u8, 0x53), bits);
+
+    value = 5;
+    scalar.min3Self(&value, 3, 4);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 5;
+    scalar.min4Self(&value, 3, 4, 2);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), value, 1e-6);
+    value = 5;
+    scalar.max3Self(&value, 3, 4);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), value, 1e-6);
+    value = 5;
+    scalar.max4Self(&value, 3, 4, 6);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), value, 1e-6);
+    value = 5;
+    scalar.fminSelf(&value, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 5;
+    scalar.fmin3Self(&value, 3, 4);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 5;
+    scalar.fmin4Self(&value, 3, 4, 2);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), value, 1e-6);
+    value = 5;
+    scalar.fmaxSelf(&value, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), value, 1e-6);
+    value = 5;
+    scalar.fmax3Self(&value, 3, 4);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), value, 1e-6);
+    value = 5;
+    scalar.fmax4Self(&value, 3, 4, 6);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), value, 1e-6);
+    value = 5;
+    scalar.fclampSelf(&value, 0, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), value, 1e-6);
+    value = 1.5;
+    scalar.clamp01Self(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = 2.25;
+    scalar.repeatSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), value, 1e-6);
+    value = 1.25;
+    scalar.mirrorClampSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), value, 1e-6);
+    value = 1.25;
+    scalar.mirrorRepeatSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75), value, 1e-6);
+
+    value = 0;
+    scalar.secSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = @as(f32, std.math.pi) / 2;
+    scalar.cscSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = @as(f32, std.math.pi) / 4;
+    scalar.cotSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = 1;
+    scalar.asecSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 1;
+    scalar.acscSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, std.math.pi) / 2, value, 1e-6);
+    value = 1;
+    scalar.acotSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, std.math.pi) / 4, value, 1e-6);
+    value = 0;
+    scalar.sechSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), value, 1e-6);
+    value = 1;
+    scalar.cschSelf(&value);
+    try std.testing.expectApproxEqAbs(1.0 / std.math.sinh(@as(f32, 1)), value, 1e-6);
+    value = 1;
+    scalar.cothSelf(&value);
+    try std.testing.expectApproxEqAbs(1.0 / std.math.tanh(@as(f32, 1)), value, 1e-6);
+    value = 1;
+    scalar.asechSelf(&value);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), value, 1e-6);
+    value = 1;
+    scalar.acschSelf(&value);
+    try std.testing.expectApproxEqAbs(std.math.asinh(@as(f32, 1)), value, 1e-6);
+    value = 2;
+    scalar.acothSelf(&value);
+    try std.testing.expectApproxEqAbs(std.math.atanh(@as(f32, 0.5)), value, 1e-6);
+
+    value = 1;
+    scalar.nextFloatSelf(&value);
+    try std.testing.expectEqual(scalar.nextFloat(@as(f32, 1)), value);
+    value = 1;
+    scalar.nextFloatNSelf(&value, 2);
+    try std.testing.expectEqual(scalar.nextFloatN(@as(f32, 1), 2), value);
+    value = 1;
+    scalar.prevFloatSelf(&value);
+    try std.testing.expectEqual(scalar.prevFloat(@as(f32, 1)), value);
+    value = 1;
+    scalar.prevFloatNSelf(&value, 2);
+    try std.testing.expectEqual(scalar.prevFloatN(@as(f32, 1), 2), value);
+
+    var remainder: i32 = 14;
+    scalar.remIntSelf(&remainder, 8);
+    try std.testing.expectEqual(@as(i32, 6), remainder);
+
+    var integer: u32 = 9;
+    scalar.ceilPowerOfTwoSelf(&integer);
+    try std.testing.expectEqual(@as(u32, 16), integer);
+    integer = 9;
+    scalar.floorPowerOfTwoSelf(&integer);
+    try std.testing.expectEqual(@as(u32, 8), integer);
+    integer = 9;
+    scalar.roundPowerOfTwoSelf(&integer);
+    try std.testing.expectEqual(@as(u32, 8), integer);
+    integer = 9;
+    scalar.nextPowerOfTwoSelf(&integer);
+    try std.testing.expectEqual(@as(u32, 16), integer);
+    integer = 9;
+    scalar.prevPowerOfTwoSelf(&integer);
+    try std.testing.expectEqual(@as(u32, 8), integer);
+    integer = 14;
+    scalar.nextMultipleSelf(&integer, 8);
+    try std.testing.expectEqual(@as(u32, 16), integer);
+    integer = 14;
+    scalar.prevMultipleSelf(&integer, 8);
+    try std.testing.expectEqual(@as(u32, 8), integer);
+    integer = 14;
+    scalar.ceilMultipleSelf(&integer, 8);
+    try std.testing.expectEqual(@as(u32, 16), integer);
+    integer = 14;
+    scalar.floorMultipleSelf(&integer, 8);
+    try std.testing.expectEqual(@as(u32, 8), integer);
+    integer = 14;
+    scalar.roundMultipleSelf(&integer, 8);
+    try std.testing.expectEqual(@as(u32, 8), integer);
+}
+
 test "scalar modf frexp ldexp" {
     const m = scalar.modf(@as(f32, 5.5));
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), m.fract, 1e-6);
@@ -344,6 +656,82 @@ test "vec integer geometry" {
     try std.testing.expectEqual(
         @as(@Vector(3, u32), .{ 0, 0, std.math.maxInt(u32) }),
         uvec3.init(.{ std.math.maxInt(u32), 0, 0 }).cross(uvec3.init(.{ 0, 1, 0 })).v,
+    );
+}
+
+test "vec bitwise and shifts" {
+    const a = uvec3.init(.{ 0b1100, 0b1010, 0b1111 });
+    const b = uvec3.init(.{ 0b1010, 0b0110, 0b0001 });
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0b1000, 0b0010, 0b0001 }), a.bitAnd(b).v);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0b1101, 0b1011, 0b1111 }), a.bitOr(0b0001).v);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0b0110, 0b1100, 0b1110 }), a.bitXor(b).v);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ ~@as(u32, 0b1100), ~@as(u32, 0b1010), ~@as(u32, 0b1111) }), a.bitNot().v);
+
+    var and_self = a;
+    and_self.bitAndSelf(b);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0b1000, 0b0010, 0b0001 }), and_self.v);
+    var or_self = a;
+    or_self.bitOrSelf(0b0001);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0b1101, 0b1011, 0b1111 }), or_self.v);
+    var xor_self = a;
+    xor_self.bitXorSelf(b);
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ 0b0110, 0b1100, 0b1110 }), xor_self.v);
+    var not_self = a;
+    not_self.bitNotSelf();
+    try std.testing.expectEqual(@as(@Vector(3, u32), .{ ~@as(u32, 0b1100), ~@as(u32, 0b1010), ~@as(u32, 0b1111) }), not_self.v);
+
+    const bytes = Vec(2, u8).init(.{ 0x81, 0x01 });
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x02, 0x02 }), bytes.shiftLeft(1).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x81, 0x01 }), bytes.shiftLeft(8).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x02, 0x02 }), bytes.shiftLeft(9).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x80, 0x02 }), bytes.shiftLeft(Vec(2, i32).init(.{ -1, 9 })).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x40, 0x00 }), bytes.shiftRightLogical(1).v);
+    try std.testing.expectEqual(@as(@Vector(2, i8), .{ -64, 0 }), Vec(2, i8).init(.{ -127, 1 }).shiftRightArithmetic(1).v);
+    try std.testing.expectEqual(@as(@Vector(2, i8), .{ -4, 4 }), Vec(2, i8).init(.{ -8, 8 }).shiftRightArithmetic(1).v);
+    try std.testing.expectEqual(@as(@Vector(2, i8), .{ 124, 4 }), Vec(2, i8).init(.{ -8, 8 }).shiftRightLogical(1).v);
+
+    var shift_self = bytes;
+    shift_self.shiftLeftSelf(1);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x02, 0x02 }), shift_self.v);
+    shift_self.shiftRightLogicalSelf(1);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x01, 0x01 }), shift_self.v);
+    shift_self = bytes;
+    shift_self.shiftLeftSelf(Vec(2, i32).init(.{ 1, 9 }));
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x02, 0x02 }), shift_self.v);
+    var signed_shift = Vec(2, i8).init(.{ -8, 8 });
+    signed_shift.shiftRightArithmeticSelf(1);
+    try std.testing.expectEqual(@as(@Vector(2, i8), .{ -4, 4 }), signed_shift.v);
+    signed_shift = Vec(2, i8).init(.{ -8, 8 });
+    signed_shift.shiftRightLogicalSelf(1);
+    try std.testing.expectEqual(@as(@Vector(2, i8), .{ 124, 4 }), signed_shift.v);
+
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x03, 0x02 }), bytes.bitfieldRotateLeft(1).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0xC0, 0x80 }), bytes.bitfieldRotateRight(1).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x03, 0x02 }), bytes.bitfieldRotateLeft(Vec(2, i32).init(.{ 1, 9 })).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0xC0, 0x80 }), bytes.bitfieldRotateRight(Vec(2, i32).init(.{ 1, 9 })).v);
+
+    var rotate_self = bytes;
+    rotate_self.bitfieldRotateLeftSelf(1);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x03, 0x02 }), rotate_self.v);
+    rotate_self.bitfieldRotateRightSelf(1);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x81, 0x01 }), rotate_self.v);
+    rotate_self = bytes;
+    rotate_self.bitfieldRotateLeftSelf(Vec(2, i32).init(.{ 1, 9 }));
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0x03, 0x02 }), rotate_self.v);
+    rotate_self = bytes;
+    rotate_self.bitfieldRotateRightSelf(Vec(2, i32).init(.{ 1, 9 }));
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 0xC0, 0x80 }), rotate_self.v);
+
+    const bf = Vec(2, u8).init(.{ 0xD6, 0xFF });
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 10, 15 }), bf.bitfieldExtract(Vec(2, u32).init(.{ 3, 3 }), 4).v);
+    try std.testing.expectEqual(@as(@Vector(2, u8), .{ 10, 15 }), bf.bitfieldExtract(3, Vec(2, u32).init(.{ 4, 4 })).v);
+    try std.testing.expectEqual(
+        @as(@Vector(2, u8), .{ 10, 15 }),
+        bf.bitfieldExtract(Vec(2, u32).init(.{ 3, 3 }), Vec(2, u32).init(.{ 4, 4 })).v,
+    );
+    try std.testing.expectEqual(
+        @as(@Vector(2, u8), .{ 60, 240 }),
+        Vec(2, u8).zero().bitfieldInsert(@as(u8, 0b1111), Vec(2, u32).init(.{ 2, 4 }), 4).v,
     );
 }
 

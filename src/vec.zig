@@ -18,6 +18,11 @@
 //! narrowing/signedness changes). Float-only operations (trigonometry,
 //! rounding, ULP helpers, float bit-casts, `inverse`, `smoothstep`) are
 //! compile errors when used with integer vectors.
+//!
+//! Bitwise methods (`bitAnd`, `bitOr`, `bitXor`, `bitNot`), shifts
+//! (`shiftLeft`, `shiftRightArithmetic`, `shiftRightLogical`) and rotates
+//! (`bitfieldRotateLeft`, `bitfieldRotateRight`) accept a scalar or a
+//! lane-typed vector as the count/operand, with in-place `...Self` forms.
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
@@ -312,6 +317,14 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
                 inline for (0..component_count) |i| r[i] = func(self.v[i], right_hand_side);
                 return .{ .v = r };
             }
+        }
+
+        /// Apply a binary bitwise function with a scalar RHS converted to the
+        /// receiver's component type, or a vector RHS with the same component
+        /// type.
+        fn bitwise2(self: Self, right_hand_side: anytype, comptime func: anytype) Self {
+            if (comptime isVec(@TypeOf(right_hand_side))) return self.apply2(right_hand_side, func);
+            return self.apply2(scalar.cast(scalar_type, right_hand_side), func);
         }
 
         /// Apply ternary scalar function `f(b, c, self[i])` per component
@@ -1202,6 +1215,107 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
 
         // ---- integer / bit ----
 
+        /// Component-wise bitwise AND. `right_hand_side` may be a vector with
+        /// the same component type or a scalar (converted with `scalar.cast`).
+        /// Use to test or combine flag masks per lane.
+        pub inline fn bitAnd(self: Self, right_hand_side: anytype) Self {
+            return self.bitwise2(right_hand_side, scalar.bitAnd);
+        }
+
+        /// In-place component-wise bitwise AND; `self` is overwritten with `bitAnd`.
+        pub inline fn bitAndSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.bitAnd(right_hand_side);
+        }
+
+        /// Component-wise bitwise OR. `right_hand_side` may be a vector with
+        /// the same component type or a scalar.
+        pub inline fn bitOr(self: Self, right_hand_side: anytype) Self {
+            return self.bitwise2(right_hand_side, scalar.bitOr);
+        }
+
+        /// In-place component-wise bitwise OR; `self` is overwritten with `bitOr`.
+        pub inline fn bitOrSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.bitOr(right_hand_side);
+        }
+
+        /// Component-wise bitwise XOR. `right_hand_side` may be a vector with
+        /// the same component type or a scalar.
+        pub inline fn bitXor(self: Self, right_hand_side: anytype) Self {
+            return self.bitwise2(right_hand_side, scalar.bitXor);
+        }
+
+        /// In-place component-wise bitwise XOR; `self` is overwritten with `bitXor`.
+        pub inline fn bitXorSelf(self: *Self, right_hand_side: anytype) void {
+            self.* = self.bitXor(right_hand_side);
+        }
+
+        /// Component-wise bitwise NOT (one's complement).
+        pub inline fn bitNot(self: Self) Self {
+            return self.apply(scalar.bitNot);
+        }
+
+        /// In-place component-wise bitwise NOT; `self` is overwritten with `bitNot`.
+        pub inline fn bitNotSelf(self: *Self) void {
+            self.* = self.bitNot();
+        }
+
+        /// Per-component left shift. `shift_count` may be a scalar or a vector
+        /// of per-lane counts; counts wrap modulo the lane bit width and bits
+        /// shifted out are discarded.
+        pub inline fn shiftLeft(self: Self, shift_count: anytype) Self {
+            return self.apply2(shift_count, scalar.shiftLeft);
+        }
+
+        /// In-place component-wise left shift; `self` is overwritten with `shiftLeft`.
+        pub inline fn shiftLeftSelf(self: *Self, shift_count: anytype) void {
+            self.* = self.shiftLeft(shift_count);
+        }
+
+        /// Per-component arithmetic right shift. Signed lanes keep their sign
+        /// (sign extension); unsigned lanes are zero-filled. Counts wrap modulo
+        /// the lane bit width.
+        pub inline fn shiftRightArithmetic(self: Self, shift_count: anytype) Self {
+            return self.apply2(shift_count, scalar.shiftRightArithmetic);
+        }
+
+        /// In-place arithmetic right shift; `self` is overwritten with `shiftRightArithmetic`.
+        pub inline fn shiftRightArithmeticSelf(self: *Self, shift_count: anytype) void {
+            self.* = self.shiftRightArithmetic(shift_count);
+        }
+
+        /// Per-component logical right shift: high bits are always zero-filled,
+        /// including for signed lanes. Counts wrap modulo the lane bit width.
+        pub inline fn shiftRightLogical(self: Self, shift_count: anytype) Self {
+            return self.apply2(shift_count, scalar.shiftRightLogical);
+        }
+
+        /// In-place logical right shift; `self` is overwritten with `shiftRightLogical`.
+        pub inline fn shiftRightLogicalSelf(self: *Self, shift_count: anytype) void {
+            self.* = self.shiftRightLogical(shift_count);
+        }
+
+        /// Rotate each lane left. `shift_count` may be a scalar or a vector of
+        /// per-lane counts; counts wrap modulo the lane bit width.
+        pub inline fn bitfieldRotateLeft(self: Self, shift_count: anytype) Self {
+            return self.apply2(shift_count, scalar.bitfieldRotateLeft);
+        }
+
+        /// In-place left rotation; `self` is overwritten with `bitfieldRotateLeft`.
+        pub inline fn bitfieldRotateLeftSelf(self: *Self, shift_count: anytype) void {
+            self.* = self.bitfieldRotateLeft(shift_count);
+        }
+
+        /// Rotate each lane right. `shift_count` may be a scalar or a vector of
+        /// per-lane counts; counts wrap modulo the lane bit width.
+        pub inline fn bitfieldRotateRight(self: Self, shift_count: anytype) Self {
+            return self.apply2(shift_count, scalar.bitfieldRotateRight);
+        }
+
+        /// In-place right rotation; `self` is overwritten with `bitfieldRotateRight`.
+        pub inline fn bitfieldRotateRightSelf(self: *Self, shift_count: anytype) void {
+            self.* = self.bitfieldRotateRight(shift_count);
+        }
+
         /// Per-component popcount (GLM `bitCount`): number of set bits in
         /// each lane. Result is i32 per GLM's `bitCount(vec)` overloads;
         /// handy for parity checks and bit-packed grid neighbors.
@@ -1233,11 +1347,13 @@ pub fn Vec(comptime component_count: usize, comptime scalar_type: type) type {
         /// `bits` bits starting at `offset` (LSB origin). `offset`/`bits`
         /// may be vectors or scalars; out-of-range bits are zero-filled.
         pub inline fn bitfieldExtract(self: Self, offset: anytype, bits: anytype) Self {
+            const offset_is_vec = comptime isVec(@TypeOf(offset));
+            const bits_is_vec = comptime isVec(@TypeOf(bits));
             var r: storage_type = undefined;
-            if (comptime isVec(@TypeOf(offset))) {
-                inline for (0..component_count) |i| r[i] = scalar.bitfieldExtract(self.v[i], offset.v[i], bits.v[i]);
-            } else {
-                inline for (0..component_count) |i| r[i] = scalar.bitfieldExtract(self.v[i], offset, bits);
+            inline for (0..component_count) |i| {
+                const lane_offset = if (offset_is_vec) offset.v[i] else offset;
+                const lane_bits = if (bits_is_vec) bits.v[i] else bits;
+                r[i] = scalar.bitfieldExtract(self.v[i], lane_offset, lane_bits);
             }
             return .{ .v = r };
         }
